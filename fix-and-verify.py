@@ -2,7 +2,7 @@ import re
 from collections import defaultdict
 from pprint import pprint
 
-from airflow.decorators import task, dag
+from airflow.decorators import task, dag, task_group
 from airflow.providers.http.operators.http import SimpleHttpOperator
 
 base_pattern = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
@@ -22,14 +22,7 @@ regex_mapping = {
 )
 def es_poc_dag():
 
-    def filter_response(response) -> dict:
-        filtered = defaultdict(list)
-        for alias_entry in response:
-            alias = alias_entry["alias"]
-            if not any(r.fullmatch(alias) for r in regex_mapping.values()):
-                continue
-            filtered[base_regex.match(alias).group(0)].append(alias_entry)
-        return filtered
+
 
     fetch_data = SimpleHttpOperator(
         task_id='fetch_data',
@@ -38,43 +31,67 @@ def es_poc_dag():
         endpoint='/_cat/aliases?h=alias,index,is_write_index',
         headers={'Accept': 'application/json'},
         response_check=lambda r: r.status_code == 200,
-        response_filter=lambda r: filter_response(r.json()),
+        response_filter=lambda r: filter(lambda _r: base_regex.match(_r["alias"]), r.json()),
         log_response=False,
     )
 
     @task()
-    def parse_response(input_data: dict) -> dict:
-        parsed = {k: {"read": [], "rollover": [], "write": []} for k in input_data.keys()}
-        for k, r in input_data.items():
-            for alias_entry in r:
+    def group_by_base_alias(input_data: list) -> dict:
+        filtered = defaultdict(list)
+        for alias_entry in input_data:
+            alias = alias_entry["alias"]
+            if not any(r.fullmatch(alias) for r in regex_mapping.values()):
+                continue
+            filtered[base_regex.match(alias).group(0)].append(alias_entry)
+        return filtered
+
+    #
+    # @task()
+    # def parse_response(input_data: dict) -> dict:
+    #     return {
+    #         key: {
+    #             t: {
+    #                 (entry["alias"], entry["index"], entry["is_write_index"])
+    #                 for entry in entries
+    #                 if regex.fullmatch(entry["alias"])
+    #             }
+    #             for t, regex in regex_mapping.items()
+    #         }
+    #         for key, entries in input_data.items()
+    #     }
+
+    @task_group
+    def alias_group(base_alias, aliases):
+        fetch_policy = SimpleHttpOperator(
+            task_id='fetch_policy',
+            http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
+            method='GET',
+            endpoint=f'/{base_alias}/_settings/index.lifecycle.name',
+            headers={'Accept': 'application/json'},
+            response_check=lambda r: r.status_code == 200,
+            response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
+            log_response=False,
+        )
+
+        @task()
+        def group_aliases() -> dict:
+            parsed = {t: [] for t in regex_mapping.keys()}
+            for alias_entry in aliases:
                 for t, regex in regex_mapping.items():
                     if regex.fullmatch(alias_entry["alias"]):
-                        parsed[k][t].append({alias_entry['alias'], alias_entry['index'], alias_entry['is_write_index']})
+                        parsed[t].append(
+                            {alias_entry['alias'], alias_entry['index'], alias_entry['is_write_index']})
                         break
-        return parsed
+            return parsed
 
-    @task()
-    def parse_res1ponse(input_data: dict) -> dict:
-        return {
-            key: {
-                t: {
-                    (entry["alias"], entry["index"], entry["is_write_index"])
-                    for entry in entries
-                    if regex.fullmatch(entry["alias"])
-                }
-                for t, regex in regex_mapping.items()
-            }
-            for key, entries in input_data.items()
-        }
+        fetch_policy
+        group_aliases
 
-    @task()
-    def aaaaaaa(item_data):
-        item, data = item_data
-        print(f"Processing: {item}")
-        pprint(data)
 
-    aaaaaaa.expand(item_data=parse_response(fetch_data.output))
-# find_missing_months
+
+
+    grouped = group_by_base_alias(fetch_data.output)
+    alias_group.expand(base_alias=grouped.keys(), aliases=grouped.values())
 
 
 es_poc_dag()
