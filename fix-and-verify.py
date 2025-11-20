@@ -90,13 +90,6 @@ def es_poc_dag():
         fetch_policy
         return group_aliases()
 
-    @task
-    def extract_keys(d: dict):
-        return list(d.keys())
-
-    @task
-    def extract_values(d: dict):
-        return list(d.values())
 
     alias_group.expand(data=group_by_base_alias(fetch_data.output))
 
