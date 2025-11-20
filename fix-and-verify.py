@@ -23,7 +23,8 @@ regex_mapping = {
 def es_poc_dag():
 
     def filter_response(response):
-        return [r for r in response if base_regex.match(r["alias"])]
+        limited_response = [r for r in response if base_regex.match(r["alias"])]
+        return limited_response[:10]
 
     fetch_data = SimpleHttpOperator(
         task_id='fetch_data',
@@ -62,7 +63,8 @@ def es_poc_dag():
     #     }
 
     @task_group
-    def alias_group(base_alias, aliases) -> dict:
+    def alias_group(data):
+        base_alias, aliases = data
         fetch_policy = SimpleHttpOperator(
             task_id='fetch_policy',
             http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
@@ -86,7 +88,7 @@ def es_poc_dag():
             return parsed
 
         fetch_policy
-        group_aliases
+        return group_aliases()
 
     @task
     def extract_keys(d: dict):
@@ -95,15 +97,8 @@ def es_poc_dag():
     @task
     def extract_values(d: dict):
         return list(d.values())
-    grouped = group_by_base_alias(fetch_data.output)
 
-    keys = extract_keys(grouped)
-    values = extract_values(grouped)
-
-    alias_group.expand(
-        base_alias=keys,
-        aliases=values,
-    )
+    alias_group.expand(data=group_by_base_alias(fetch_data.output))
 
 
 es_poc_dag()
