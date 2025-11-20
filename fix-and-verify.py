@@ -22,7 +22,8 @@ regex_mapping = {
 )
 def es_poc_dag():
 
-
+    def filter_response(response):
+        return [r for r in response if base_regex.match(r["alias"])]
 
     fetch_data = SimpleHttpOperator(
         task_id='fetch_data',
@@ -31,7 +32,7 @@ def es_poc_dag():
         endpoint='/_cat/aliases?h=alias,index,is_write_index',
         headers={'Accept': 'application/json'},
         response_check=lambda r: r.status_code == 200,
-        response_filter=lambda r: filter(lambda _r: base_regex.match(_r["alias"]), r.json()),
+        response_filter=lambda r: filter_response(r.json()),
         log_response=False,
     )
 
