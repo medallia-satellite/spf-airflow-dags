@@ -87,9 +87,8 @@ def es_poc_dag():
 
         @task
         def verify_write_aliases(alias, alias_list, num_months):
-            start_date = datetime.date.replace(
-                datetime.datetime.today(), day=1
-            ) + relativedelta(months=1)
+            today = datetime.date.today()
+            start_date = today.replace(day=1) + relativedelta(months=1)
 
             for monthly_alias in monthly_aliases(alias, start_date, num_months):
                 assert monthly_alias in alias_list, f"Missing alias '{monthly_alias}'"
