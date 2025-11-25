@@ -46,14 +46,15 @@ def es_poc_dag():
             if not any(r.fullmatch(alias) for r in regex_mapping.values()):
                 continue
             filtered[base_regex.match(alias).group(0)].append(alias_entry)
-        return [{"base_alias": k, "aliases": v} for k, v in filtered.items()]
+        #return [{"base_alias": k, "aliases": v} for k, v in filtered.items()]
+        return [(k, v) for k, v in filtered.items()]
 
     @task_group
-    def alias_group(base_alias, aliases):
+    def alias_group(input_data: list):
+        base_alias, aliases = input_data
         @task
-        def print_input(b, a):
-            print(b)
-            pprint(a)
+        def print_input(a):
+            print(input_data)
 
         fetch_policy = SimpleHttpOperator(
             task_id='fetch_policy',
@@ -82,10 +83,7 @@ def es_poc_dag():
         return group_aliases()
 
     grouped = group_by_base_alias(fetch_data.output)
-    alias_group.partial().expand(
-        base_alias=[x["base_alias"] for x in grouped],
-        aliases=[x["aliases"] for x in grouped],
-    )
+    alias_group.partial().expand(input_data=grouped)
 
 
 es_poc_dag()
