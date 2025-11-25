@@ -64,31 +64,7 @@ def es_poc_dag():
 
     @task_group
     def alias_group(data):
-        base_alias, aliases = data
-        fetch_policy = SimpleHttpOperator(
-            task_id='fetch_policy',
-            http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
-            method='GET',
-            endpoint=f'/{base_alias}/_settings/index.lifecycle.name',
-            headers={'Accept': 'application/json'},
-            response_check=lambda r: r.status_code == 200,
-            response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
-            log_response=False,
-        )
-
-        @task()
-        def group_aliases() -> dict:
-            parsed = {t: [] for t in regex_mapping.keys()}
-            for alias_entry in aliases:
-                for t, regex in regex_mapping.items():
-                    if regex.fullmatch(alias_entry["alias"]):
-                        parsed[t].append(
-                            {alias_entry['alias'], alias_entry['index'], alias_entry['is_write_index']})
-                        break
-            return parsed
-
-        fetch_policy
-        return group_aliases()
+        print(data)
 
 
     alias_group.expand(data=group_by_base_alias(fetch_data.output))
