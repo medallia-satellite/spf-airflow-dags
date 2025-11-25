@@ -77,9 +77,9 @@ def es_poc_dag():
 
         @task
         def validate_policy(policies):
-            assert all(p in policy_mapping for p in policies)
+            assert all(p in policy_mapping for p in policies), f"Invalid policies: {policies}"
             retention = set(policy_mapping.get(p) for p in policies)
-            assert len(retention) == 1
+            assert len(retention) == 1, f"Retention period is not unique: {policies}"
             return next(iter(retention))
 
         @task()
