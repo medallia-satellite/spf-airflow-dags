@@ -51,7 +51,12 @@ def es_poc_dag():
 
     @task_group
     def alias_group(input_data):
-        base_alias, aliases = input_data
+
+        @task
+        def unpack(d):
+            return d[0], d[1]
+
+        base_alias, aliases = unpack(input_data)
 
         @task
         def print_input(a):
