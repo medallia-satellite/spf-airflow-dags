@@ -45,7 +45,7 @@ def es_poc_dag():
             if not any(r.fullmatch(alias) for r in regex_mapping.values()):
                 continue
             filtered[base_regex.match(alias).group(0)].append(alias_entry)
-        return [{"base_alias": k, "aliases": v} for k, v in filtered.items()]
+        return [{"key": k, "value": v} for k, v in filtered.items()]
 
     #
     # @task()
@@ -90,7 +90,7 @@ def es_poc_dag():
         return group_aliases()
 
 
-    alias_group.expand(**group_by_base_alias(fetch_data.output))
+    alias_group.expand(group_by_base_alias(fetch_data.output))
 
 
 es_poc_dag()
