@@ -115,7 +115,7 @@ def es_poc_dag():
 
         retention = retention_from_policies(policies=validate_policies(policies=fetch_policies(alias=base_alias)))
 
-        verify_write_aliases(alias=base_alias, alias_list=write_aliases(alias=base_alias), num_months=retention)
+        verify_write_aliases(alias=base_alias, alias_list=write_aliases(alias_list=base_alias), num_months=retention)
 
         return group_aliases(aliases)
 
