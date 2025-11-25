@@ -80,25 +80,27 @@ def es_poc_dag():
 
     @task_group
     def verify_alias(base_alias, aliases):
-        @task
-        def write_aliases(alias_list):
-            regex = regex_mapping["write"]
-            return {alias['alias']: alias["index"] for alias in alias_list if regex.fullmatch(alias['alias']) and alias["is_write_index"]}
 
         @task
         def verify_write_aliases(alias, alias_list, num_months):
+            regex = regex_mapping["write"]
+
+            write_aliases= {alias['alias']: alias["index"] for alias in alias_list if
+                    regex.fullmatch(alias['alias']) and alias["is_write_index"]}
+
             today = datetime.date.today()
             start_date = today.replace(day=1) + relativedelta(months=1)
+
             missing_aliases = []
             for monthly_alias in monthly_aliases(alias, start_date, num_months):
-                if monthly_alias not in alias_list:
+                if monthly_alias not in write_aliases:
                     missing_aliases.append(monthly_alias)
                 # assert monthly_alias in alias_list, f"Missing alias '{monthly_alias}'"
             assert len(missing_aliases) == 0, f"Missing aliases: {missing_aliases}"
 
         retention = retention_from_policies(policies=fetch_policies(alias=base_alias))
 
-        verify_write_aliases(alias=base_alias, alias_list=write_aliases(alias_list=aliases), num_months=retention)
+        verify_write_aliases(alias=base_alias, alias_list=aliases, num_months=retention)
 
     verify_alias.partial().expand_kwargs(group_aliases_by_base(fetch_aliases()))
 
