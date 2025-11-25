@@ -4,6 +4,7 @@ from pprint import pprint
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.operators.http import SimpleHttpOperator
+from click import get_current_context
 
 base_pattern = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
 base_regex = re.compile(base_pattern)
@@ -56,6 +57,7 @@ def es_poc_dag():
 
         @task
         def fetch_policy(alias: str):
+            context = get_current_context()
             op = SimpleHttpOperator(
                 task_id='fetch_policy',
                 http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
@@ -66,7 +68,7 @@ def es_poc_dag():
                 response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
                 log_response=False,
             )
-            return op.execute()
+            return op.execute(context=context)
 
         @task()
         def group_aliases() -> dict:
