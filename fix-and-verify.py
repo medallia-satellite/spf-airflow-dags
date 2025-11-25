@@ -82,7 +82,7 @@ def es_poc_dag():
                         break
             return parsed
 
-        fetch_policy(base_alias)
+        fetch_policy(alias=base_alias)
         print_input(base_alias, aliases)
         return group_aliases()
 
