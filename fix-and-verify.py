@@ -83,9 +83,9 @@ def es_poc_dag():
             return policy
 
         @task()
-        def group_aliases() -> dict:
+        def group_aliases(aaa) -> dict:
             parsed = {t: [] for t in regex_mapping.keys()}
-            for alias_entry in aliases:
+            for alias_entry in aaa:
                 for t, regex in regex_mapping.items():
                     if regex.fullmatch(alias_entry["alias"]):
                         parsed[t].append(
@@ -95,7 +95,7 @@ def es_poc_dag():
 
         validate_policy(fetch_policy(alias=base_alias))
 
-        return group_aliases()
+        return group_aliases(aliases)
 
     grouped = group_by_base_alias(fetch_data.output)
     alias_group.partial().expand(
