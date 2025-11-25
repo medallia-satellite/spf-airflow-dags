@@ -64,7 +64,11 @@ def es_poc_dag():
 
     @task_group
     def alias_group(data):
-        print(data)
+        @task
+        def testing(d):
+            print(d)
+
+        return testing(data)
 
 
     alias_group.expand(data=group_by_base_alias(fetch_data.output))
