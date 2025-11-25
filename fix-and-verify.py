@@ -80,7 +80,7 @@ def es_poc_dag():
             assert all(p in policy_mapping for p in policies)
             retention = set(policy_mapping.get(p) for p in policies)
             assert len(retention) == 1
-            return retention[0]
+            return next(iter(retention))
 
         @task()
         def group_aliases(aaa) -> dict:
