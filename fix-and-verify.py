@@ -67,7 +67,7 @@ def es_poc_dag():
 
             print(response.json())
 
-            return set(p["settings"] for _, p in response.json().items())
+            return set(p["settings"]["index"]["lifecycle"]["name"] for _, p in response.json().items())
 
 
         @task()
