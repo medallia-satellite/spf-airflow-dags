@@ -102,22 +102,11 @@ def es_poc_dag():
             for monthly_alias in monthly_aliases(alias, start_date, num_months):
                 assert monthly_alias in alias_list, f"Missing alias '{monthly_alias}'"
 
-        @task()
-        def group_aliases(aaa) -> dict:
-            parsed = {t: [] for t in regex_mapping.keys()}
-            for alias_entry in aaa:
-                for t, regex in regex_mapping.items():
-                    if regex.fullmatch(alias_entry["alias"]):
-                        parsed[t].append(
-                            {alias_entry['alias'], alias_entry['index'], alias_entry['is_write_index']})
-                        break
-            return parsed
 
         retention = retention_from_policies(policies=validate_policies(policies=fetch_policies(alias=base_alias)))
 
         verify_write_aliases(alias=base_alias, alias_list=write_aliases(alias_list=aliases), num_months=retention)
 
-        return group_aliases(aliases)
 
     grouped = group_by_base_alias(fetch_data.output)
 
