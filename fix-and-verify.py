@@ -23,7 +23,7 @@ regex_mapping = {
     catchup=False,
 )
 def es_poc_dag():
-
+    hook = HttpHook(method='GET', http_conn_id='es-wordtags')
     def filter_response(response):
         limited_response = [r for r in response if base_regex.match(r["alias"])]
         return limited_response[:10]
@@ -58,14 +58,14 @@ def es_poc_dag():
 
         @task
         def fetch_policy(alias: str):
-            hook = HttpHook(method='GET', http_conn_id='es-wordtags')
             response = hook.run(
                 endpoint=f'/{alias}/_settings/index.lifecycle.name',
                 headers={'Accept': 'application/json'},
-                response_check=lambda r: r.status_code == 200,
                 response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
             )
-            return response
+            hook.check_response(response)
+
+            return set(p["settings"] for _, p in response.json().items())
 
 
         @task()
