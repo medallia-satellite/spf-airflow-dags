@@ -39,44 +39,42 @@ def es_poc_dag():
     )
 
     @task()
-    def group_by_base_alias(input_data: list):
+    def group_by_base_alias(input_data: list) -> list:
         filtered = defaultdict(list)
         for alias_entry in input_data:
             alias = alias_entry["alias"]
             if not any(r.fullmatch(alias) for r in regex_mapping.values()):
                 continue
             filtered[base_regex.match(alias).group(0)].append(alias_entry)
-        #return [{"base_alias": k, "aliases": v} for k, v in filtered.items()]
-        return [(k, v) for k, v in filtered.items()]
+        return [{"base_alias": k, "aliases": v} for k, v in filtered.items()]
 
     @task_group
-    def alias_group(input_data):
+    def alias_group(base_alias, aliases):
+        @task
+        def print_input(b, a):
+            print(b)
+            pprint(a)
 
         @task
-        def unpack(d):
-            return d[0], d[1]
+        def fetch_policy(alias: str):
+            context = get_current_context()
+            op = SimpleHttpOperator(
+                task_id='fetch_policy',
+                http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
+                method='GET',
+                endpoint='/{{ params.alias }}/_settings/index.lifecycle.name',
+                headers={'Accept': 'application/json'},
+                params={"alias": alias},
+                response_check=lambda r: r.status_code == 200,
+                response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
+                log_response=False,
+            )
+            return op.execute(context=context)
 
-        base_alias, aliases = unpack(input_data)
-
-        @task
-        def print_input(a):
-            print(a)
-
-        fetch_policy = SimpleHttpOperator(
-            task_id='fetch_policy',
-            http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
-            method='GET',
-            endpoint='/{{ params.base_alias }}/_settings/index.lifecycle.name',
-            headers={'Accept': 'application/json'},
-            params={"base_alias": base_alias},
-            response_check=lambda r: r.status_code == 200,
-            response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
-            log_response=False,
-        )
         @task()
-        def group_aliases(aaaa) -> dict:
+        def group_aliases() -> dict:
             parsed = {t: [] for t in regex_mapping.keys()}
-            for alias_entry in aaaa:
+            for alias_entry in aliases:
                 for t, regex in regex_mapping.items():
                     if regex.fullmatch(alias_entry["alias"]):
                         parsed[t].append(
@@ -84,12 +82,15 @@ def es_poc_dag():
                         break
             return parsed
 
-        fetch_policy
-        print_input(input_data)
-        return group_aliases(aliases)
+        fetch_policy(base_alias)
+        print_input(base_alias, aliases)
+        return group_aliases()
 
     grouped = group_by_base_alias(fetch_data.output)
-    alias_group.partial().expand(input_data=grouped)
+    alias_group.partial().expand(
+        base_alias=grouped.map(lambda x: x["base_alias"]),
+        aliases=grouped.map(lambda x: x["aliases"]),
+    )
 
 
 es_poc_dag()
