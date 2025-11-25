@@ -63,6 +63,9 @@ def es_poc_dag():
                 headers={'Accept': 'application/json'},
             )
             hook.check_response(response)
+            print(response)
+
+            print(response.json())
 
             return set(p["settings"] for _, p in response.json().items())
 
