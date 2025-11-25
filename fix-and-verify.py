@@ -75,7 +75,10 @@ def es_poc_dag():
         return group_aliases()
 
     grouped = group_by_base_alias(fetch_data.output)
-    alias_group.partial().expand(grouped)
+    alias_group.partial().expand(
+        base_alias=grouped.map(lambda x: x["base_alias"]),
+        aliases=grouped.map(lambda x: x["aliases"]),
+    )
 
 
 es_poc_dag()
