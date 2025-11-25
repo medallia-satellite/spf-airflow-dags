@@ -61,7 +61,6 @@ def es_poc_dag():
             response = hook.run(
                 endpoint=f'/{alias}/_settings/index.lifecycle.name',
                 headers={'Accept': 'application/json'},
-                response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
             )
             hook.check_response(response)
 
