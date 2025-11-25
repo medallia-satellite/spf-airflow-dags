@@ -6,7 +6,6 @@ from typing import Iterator
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
-from airflow.providers.http.operators.http import SimpleHttpOperator
 from dateutil.relativedelta import relativedelta
 
 base_pattern = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
@@ -49,7 +48,7 @@ def es_poc_dag():
             headers={'Accept': 'application/json'},
         )
         hook.check_response(response)
-        return [r for r in response.json() if base_regex.match(r["alias"])]
+        return [r for r in response.json() if base_regex.match(r["alias"])][:10]
 
     @task
     def fetch_policies(alias):
@@ -60,6 +59,19 @@ def es_poc_dag():
         hook.check_response(response)
         return set(p["settings"]["index"]["lifecycle"]["name"] for _, p in response.json().items())
 
+    @task
+    def fetch_mappings(alias):
+        response = hook.run(
+            endpoint=f'/{alias}/_settings/index.analysis.filter.compound_capture.patterns',
+            headers={'Accept': 'application/json'},
+        )
+        hook.check_response(response)
+        return set(p["settings"]["index"]["analysis"]["filter"]["compound_capture"]["patterns"][0] for _, p in response.json().items())
+
+    @task
+    def verify_mapping(mappings):
+        assert all(m == "(!?[^@!@]+)@!@" for m in mappings), f"Invalid mappings: {mappings}"
+        return next(iter(mappings))
 
     @task()
     def group_aliases_by_base(aliases: list) -> list:
@@ -78,29 +90,28 @@ def es_poc_dag():
         assert len(set(policy_mapping.get(p) for p in policies)) == 1, f"Retention period is not unique: {policies}"
         return next(iter(set(policy_mapping.get(p) for p in policies)))
 
+    @task
+    def verify_write_aliases(alias, alias_list, num_months):
+        regex = regex_mapping["write"]
+
+        write_aliases= {alias['alias']: alias["index"] for alias in alias_list if
+                regex.fullmatch(alias['alias']) and alias["is_write_index"]}
+
+        today = datetime.date.today()
+        start_date = today.replace(day=1) + relativedelta(months=1)
+
+        missing_aliases = []
+        for monthly_alias in monthly_aliases(alias, start_date, num_months):
+            if monthly_alias not in write_aliases:
+                missing_aliases.append(monthly_alias)
+        assert len(missing_aliases) == 0, f"Missing aliases: {missing_aliases}"
+
     @task_group
     def verify_alias(base_alias, aliases):
-
-        @task
-        def verify_write_aliases(alias, alias_list, num_months):
-            regex = regex_mapping["write"]
-
-            write_aliases= {alias['alias']: alias["index"] for alias in alias_list if
-                    regex.fullmatch(alias['alias']) and alias["is_write_index"]}
-
-            today = datetime.date.today()
-            start_date = today.replace(day=1) + relativedelta(months=1)
-
-            missing_aliases = []
-            for monthly_alias in monthly_aliases(alias, start_date, num_months):
-                if monthly_alias not in write_aliases:
-                    missing_aliases.append(monthly_alias)
-                # assert monthly_alias in alias_list, f"Missing alias '{monthly_alias}'"
-            assert len(missing_aliases) == 0, f"Missing aliases: {missing_aliases}"
-
+        mapping = verify_mapping(mappings=fetch_mappings(alias=base_alias))
         retention = retention_from_policies(policies=fetch_policies(alias=base_alias))
-
         verify_write_aliases(alias=base_alias, alias_list=aliases, num_months=retention)
+
 
     verify_alias.partial().expand_kwargs(group_aliases_by_base(fetch_aliases()))
 
