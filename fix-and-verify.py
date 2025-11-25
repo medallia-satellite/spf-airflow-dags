@@ -5,7 +5,6 @@ from pprint import pprint
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
 from airflow.providers.http.operators.http import SimpleHttpOperator
-from click import get_current_context
 
 base_pattern = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
 base_regex = re.compile(base_pattern)
@@ -15,6 +14,16 @@ regex_mapping = {
     "write": re.compile(rf"^{base_pattern}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
     "rollover": re.compile(rf"^{base_pattern}-rollover$"),
 }
+
+policy_mapping = {
+	"M6": 217.0,
+	"M6_rollover": 217.0,
+	"M18": 589.0,
+	"M18_rollover": 589.0,
+	"M36": 1147.0,
+	"M36_rollover": 1147.0,
+}
+
 
 @dag(
     dag_display_name="SPF ES POC",
@@ -51,10 +60,11 @@ def es_poc_dag():
 
     @task_group
     def alias_group(base_alias, aliases):
-        @task
-        def print_input(b, a):
-            print(b)
-            pprint(a)
+        # @task
+        # def print_input(b, a):
+        #     print(b)
+        #     pprint(a)
+        # print_input(base_alias, aliases)
 
         @task
         def fetch_policy(alias: str):
@@ -63,12 +73,14 @@ def es_poc_dag():
                 headers={'Accept': 'application/json'},
             )
             hook.check_response(response)
-            print(response)
-
-            print(response.json())
-
             return set(p["settings"]["index"]["lifecycle"]["name"] for _, p in response.json().items())
 
+        @task
+        def validate_policy(policies):
+            assert len(policies) == 1
+            policy = policies[0]
+            assert policy in policy_mapping
+            return policy
 
         @task()
         def group_aliases() -> dict:
@@ -81,8 +93,8 @@ def es_poc_dag():
                         break
             return parsed
 
-        fetch_policy(alias=base_alias)
-        print_input(base_alias, aliases)
+        validate_policy(fetch_policy(alias=base_alias))
+
         return group_aliases()
 
     grouped = group_by_base_alias(fetch_data.output)
