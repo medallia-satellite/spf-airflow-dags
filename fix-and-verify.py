@@ -90,7 +90,7 @@ def es_poc_dag():
         return group_aliases()
 
 
-    alias_group.expand(group_by_base_alias(fetch_data.output))
+    alias_group.expand(**group_by_base_alias(fetch_data.output))
 
 
 es_poc_dag()
