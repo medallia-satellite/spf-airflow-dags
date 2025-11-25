@@ -1,10 +1,13 @@
+import datetime
 import re
 from collections import defaultdict
 from pprint import pprint
+from typing import Iterator
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
 from airflow.providers.http.operators.http import SimpleHttpOperator
+from dateutil.relativedelta import relativedelta
 
 base_pattern = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
 base_regex = re.compile(base_pattern)
@@ -24,6 +27,11 @@ policy_mapping = {
 	"M36_rollover": 1147.0,
 }
 
+def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[str]:
+    current_date = start_date
+    for _ in range(num_months):
+        yield f"{alias}-{current_date:%Y-%m-%d}"
+        current_date -= relativedelta(months=1)
 
 @dag(
     dag_display_name="SPF ES POC",
@@ -59,15 +67,10 @@ def es_poc_dag():
         return [{"base_alias": k, "aliases": v} for k, v in filtered.items()]
 
     @task_group
-    def alias_group(base_alias, aliases):
-        # @task
-        # def print_input(b, a):
-        #     print(b)
-        #     pprint(a)
-        # print_input(base_alias, aliases)
+    def verify_alias(base_alias, aliases):
 
         @task
-        def fetch_policy(alias: str):
+        def fetch_policies(alias):
             response = hook.run(
                 endpoint=f'/{alias}/_settings/index.lifecycle.name',
                 headers={'Accept': 'application/json'},
@@ -76,11 +79,28 @@ def es_poc_dag():
             return set(p["settings"]["index"]["lifecycle"]["name"] for _, p in response.json().items())
 
         @task
-        def validate_policy(policies):
+        def validate_policies(policies):
             assert all(p in policy_mapping for p in policies), f"Invalid policies: {policies}"
-            retention = set(policy_mapping.get(p) for p in policies)
-            assert len(retention) == 1, f"Retention period is not unique: {policies}"
-            return next(iter(retention))
+            assert len(set(policy_mapping.get(p) for p in policies)) == 1, f"Retention period is not unique: {policies}"
+            return policies
+
+        @task
+        def retention_from_policies(policies):
+            return next(iter(set(policy_mapping.get(p) for p in policies)))
+
+        @task
+        def write_aliases(alias_list):
+            regex = regex_mapping["write"]
+            return {alias['alias']: alias["index"] for alias in alias_list if regex.fullmatch(alias['alias']) and alias["is_write_index"]}
+
+        @task
+        def verify_write_aliases(alias, alias_list, num_months):
+            start_date = datetime.date.replace(
+                datetime.datetime.today(), day=1
+            ) + relativedelta(months=1)
+
+            for monthly_alias in monthly_aliases(alias, start_date, num_months):
+                assert monthly_alias in alias_list, f"Missing alias '{monthly_alias}'"
 
         @task()
         def group_aliases(aaa) -> dict:
@@ -93,12 +113,15 @@ def es_poc_dag():
                         break
             return parsed
 
-        validate_policy(policies=fetch_policy(alias=base_alias))
+        retention = retention_from_policies(policies=validate_policies(policies=fetch_policies(alias=base_alias)))
+
+        verify_write_aliases(alias=base_alias, alias_list=write_aliases(alias=base_alias), num_months=retention)
 
         return group_aliases(aliases)
 
     grouped = group_by_base_alias(fetch_data.output)
-    alias_group.partial().expand(
+
+    verify_alias.partial().expand(
         base_alias=grouped.map(lambda x: x["base_alias"]),
         aliases=grouped.map(lambda x: x["aliases"]),
     )
