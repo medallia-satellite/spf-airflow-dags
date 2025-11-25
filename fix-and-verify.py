@@ -3,6 +3,7 @@ from collections import defaultdict
 from pprint import pprint
 
 from airflow.decorators import task, dag, task_group
+from airflow.providers.http.hooks.http import HttpHook
 from airflow.providers.http.operators.http import SimpleHttpOperator
 from click import get_current_context
 
@@ -57,19 +58,15 @@ def es_poc_dag():
 
         @task
         def fetch_policy(alias: str):
-            context = get_current_context()
-            op = SimpleHttpOperator(
-                task_id='fetch_policy',
-                http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
-                method='GET',
-                endpoint='/{{ params.alias }}/_settings/index.lifecycle.name',
+            hook = HttpHook(method='GET', http_conn_id='es-wordtags')
+            response = hook.run(
+                endpoint=f'/{alias}/_settings/index.lifecycle.name',
                 headers={'Accept': 'application/json'},
-                params={"alias": alias},
                 response_check=lambda r: r.status_code == 200,
                 response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
-                log_response=False,
             )
-            return op.execute(context=context)
+            return response
+
 
         @task()
         def group_aliases() -> dict:
