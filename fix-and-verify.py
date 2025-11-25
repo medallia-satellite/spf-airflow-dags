@@ -55,21 +55,17 @@ def es_poc_dag():
             print(b)
             pprint(a)
 
-        @task
-        def fetch_policy(alias: str):
-            context = get_current_context()
-            op = SimpleHttpOperator(
-                task_id='fetch_policy',
-                http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
-                method='GET',
-                endpoint=f'/{alias}/_settings/index.lifecycle.name',
-                headers={'Accept': 'application/json'},
-                response_check=lambda r: r.status_code == 200,
-                response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
-                log_response=False,
-            )
-            return op.execute(context=context)
-
+        fetch_policy = SimpleHttpOperator(
+            task_id='fetch_policy',
+            http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
+            method='GET',
+            endpoint='/{{ params.base_alias }}/_settings/index.lifecycle.name',
+            headers={'Accept': 'application/json'},
+            params={"base_alias": base_alias},
+            response_check=lambda r: r.status_code == 200,
+            response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
+            log_response=False,
+        )
         @task()
         def group_aliases() -> dict:
             parsed = {t: [] for t in regex_mapping.keys()}
@@ -81,7 +77,7 @@ def es_poc_dag():
                         break
             return parsed
 
-        fetch_policy(base_alias)
+        fetch_policy
         print_input(base_alias, aliases)
         return group_aliases()
 
