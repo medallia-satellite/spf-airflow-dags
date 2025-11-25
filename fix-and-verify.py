@@ -74,8 +74,8 @@ def es_poc_dag():
         fetch_policy
         return group_aliases()
 
-
-    alias_group.partial().expand(group_by_base_alias(fetch_data.output))
+    grouped = group_by_base_alias(fetch_data.output)
+    alias_group.partial().expand(grouped)
 
 
 es_poc_dag()
