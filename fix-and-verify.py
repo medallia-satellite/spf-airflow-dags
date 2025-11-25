@@ -91,7 +91,7 @@ def es_poc_dag():
             start_date = today.replace(day=1) + relativedelta(months=1)
             missing_aliases = []
             for monthly_alias in monthly_aliases(alias, start_date, num_months):
-                if monthly_alias not in aliases:
+                if monthly_alias not in alias_list:
                     missing_aliases.append(monthly_alias)
                 # assert monthly_alias in alias_list, f"Missing alias '{monthly_alias}'"
             assert len(missing_aliases) == 0, f"Missing aliases: {missing_aliases}"
