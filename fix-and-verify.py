@@ -19,12 +19,12 @@ regex_mapping = {
 }
 
 policy_mapping = {
-	"M6": 217.0,
-	"M6_rollover": 217.0,
-	"M18": 589.0,
-	"M18_rollover": 589.0,
-	"M36": 1147.0,
-	"M36_rollover": 1147.0,
+	"M6": 6,
+	"M6_rollover": 6,
+	"M18": 18,
+	"M18_rollover": 18,
+	"M36": 36,
+	"M36_rollover": 36,
 }
 
 def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[str]:
