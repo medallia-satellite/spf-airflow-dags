@@ -63,7 +63,7 @@ def es_poc_dag():
             response_check=lambda r: r.status_code == 200,
             response_filter=lambda r: set(p["settings"] for _, p in r.json().items()),
             log_response=False,
-        ).partial()
+        )
 
         @task()
         def group_aliases() -> dict:
