@@ -43,7 +43,7 @@ def es_poc_dag():
     hook = HttpHook(method='GET', http_conn_id='es-wordtags')
     def filter_response(response):
         limited_response = [r for r in response if base_regex.match(r["alias"])]
-        return limited_response[:10]
+        return limited_response
 
     fetch_data = SimpleHttpOperator(
         task_id='fetch_data',
