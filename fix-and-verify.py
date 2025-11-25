@@ -77,10 +77,10 @@ def es_poc_dag():
 
         @task
         def validate_policy(policies):
-            assert len(policies) == 1
-            policy = policies[0]
-            assert policy in policy_mapping
-            return policy
+            assert all(p in policy_mapping for p in policies)
+            retention = set(policy_mapping.get(p) for p in policies)
+            assert len(retention) == 1
+            return retention[0]
 
         @task()
         def group_aliases(aaa) -> dict:
