@@ -41,53 +41,45 @@ def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> I
 )
 def es_poc_dag():
     hook = HttpHook(method='GET', http_conn_id='es-wordtags')
-    def filter_response(response):
-        limited_response = [r for r in response if base_regex.match(r["alias"])]
-        return limited_response
-
-    fetch_data = SimpleHttpOperator(
-        task_id='fetch_data',
-        http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
-        method='GET',
-        endpoint='/_cat/aliases?h=alias,index,is_write_index',
-        headers={'Accept': 'application/json'},
-        response_check=lambda r: r.status_code == 200,
-        response_filter=lambda r: filter_response(r.json()),
-        log_response=False,
-    )
 
     @task()
-    def group_by_base_alias(input_data: list) -> list:
-        filtered = defaultdict(list)
-        for alias_entry in input_data:
+    def fetch_aliases():
+        response = hook.run(
+            endpoint='/_cat/aliases?h=alias,index,is_write_index',
+            headers={'Accept': 'application/json'},
+        )
+        hook.check_response(response)
+        return [r for r in response.json() if base_regex.match(r["alias"])]
+
+    @task
+    def fetch_policies(alias):
+        response = hook.run(
+            endpoint=f'/{alias}/_settings/index.lifecycle.name',
+            headers={'Accept': 'application/json'},
+        )
+        hook.check_response(response)
+        return set(p["settings"]["index"]["lifecycle"]["name"] for _, p in response.json().items())
+
+
+    @task()
+    def group_aliases_by_base(aliases: list) -> list:
+        grouped = defaultdict(list)
+        for alias_entry in aliases:
             alias = alias_entry["alias"]
             if not any(r.fullmatch(alias) for r in regex_mapping.values()):
                 continue
-            filtered[base_regex.match(alias).group(0)].append(alias_entry)
-        return [{"base_alias": k, "aliases": v} for k, v in filtered.items()]
+            grouped[base_regex.match(alias).group(0)].append(alias_entry)
+        return [{"base_alias": k, "aliases": v} for k, v in grouped.items()]
+
+
+    @task
+    def retention_from_policies(policies):
+        assert all(p in policy_mapping for p in policies), f"Invalid policies: {policies}"
+        assert len(set(policy_mapping.get(p) for p in policies)) == 1, f"Retention period is not unique: {policies}"
+        return next(iter(set(policy_mapping.get(p) for p in policies)))
 
     @task_group
     def verify_alias(base_alias, aliases):
-
-        @task
-        def fetch_policies(alias):
-            response = hook.run(
-                endpoint=f'/{alias}/_settings/index.lifecycle.name',
-                headers={'Accept': 'application/json'},
-            )
-            hook.check_response(response)
-            return set(p["settings"]["index"]["lifecycle"]["name"] for _, p in response.json().items())
-
-        @task
-        def validate_policies(policies):
-            assert all(p in policy_mapping for p in policies), f"Invalid policies: {policies}"
-            assert len(set(policy_mapping.get(p) for p in policies)) == 1, f"Retention period is not unique: {policies}"
-            return policies
-
-        @task
-        def retention_from_policies(policies):
-            return next(iter(set(policy_mapping.get(p) for p in policies)))
-
         @task
         def write_aliases(alias_list):
             regex = regex_mapping["write"]
@@ -102,18 +94,11 @@ def es_poc_dag():
             for monthly_alias in monthly_aliases(alias, start_date, num_months):
                 assert monthly_alias in alias_list, f"Missing alias '{monthly_alias}'"
 
-
-        retention = retention_from_policies(policies=validate_policies(policies=fetch_policies(alias=base_alias)))
+        retention = retention_from_policies(policies=fetch_policies(alias=base_alias))
 
         verify_write_aliases(alias=base_alias, alias_list=write_aliases(alias_list=aliases), num_months=retention)
 
-
-    grouped = group_by_base_alias(fetch_data.output)
-
-    verify_alias.partial().expand(
-        base_alias=grouped.map(lambda x: x["base_alias"]),
-        aliases=grouped.map(lambda x: x["aliases"]),
-    )
+    verify_alias.partial().expand_kwargs(group_aliases_by_base(fetch_aliases()))
 
 
 es_poc_dag()
