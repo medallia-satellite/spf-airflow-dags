@@ -49,6 +49,11 @@ def es_poc_dag():
 
     @task_group
     def alias_group(base_alias, aliases):
+        @task
+        def print_input(b, a):
+            print(b)
+            pprint(a)
+
         fetch_policy = SimpleHttpOperator(
             task_id='fetch_policy',
             http_conn_id='es-wordtags',  # Refers to the connection ID defined in Airflow
@@ -72,6 +77,7 @@ def es_poc_dag():
             return parsed
 
         fetch_policy
+        print_input(base_alias, aliases)
         return group_aliases()
 
     grouped = group_by_base_alias(fetch_data.output)
