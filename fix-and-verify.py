@@ -45,22 +45,7 @@ def es_poc_dag():
             if not any(r.fullmatch(alias) for r in regex_mapping.values()):
                 continue
             filtered[base_regex.match(alias).group(0)].append(alias_entry)
-        return [{"key": k, "value": v} for k, v in filtered.items()]
-
-    #
-    # @task()
-    # def parse_response(input_data: dict) -> dict:
-    #     return {
-    #         key: {
-    #             t: {
-    #                 (entry["alias"], entry["index"], entry["is_write_index"])
-    #                 for entry in entries
-    #                 if regex.fullmatch(entry["alias"])
-    #             }
-    #             for t, regex in regex_mapping.items()
-    #         }
-    #         for key, entries in input_data.items()
-    #     }
+        return [{"base_alias": k, "aliases": v} for k, v in filtered.items()]
 
     @task_group
     def alias_group(base_alias, aliases):
