@@ -39,7 +39,7 @@ def es_poc_dag():
     )
 
     @task()
-    def group_by_base_alias(input_data: list) -> list:
+    def group_by_base_alias(input_data: list):
         filtered = defaultdict(list)
         for alias_entry in input_data:
             alias = alias_entry["alias"]
@@ -84,7 +84,7 @@ def es_poc_dag():
         return group_aliases(aliases)
 
     grouped = group_by_base_alias(fetch_data.output)
-    alias_group.partial().expand(grouped)
+    alias_group.partial().expand(input_data=grouped)
 
 
 es_poc_dag()
