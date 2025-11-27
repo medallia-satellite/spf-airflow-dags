@@ -121,16 +121,17 @@ def fnv():
 
     @task_group
     def aaaaaaaa(instance, aliases):
-        retention, rollover_alias = extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
-
-        return identify_missing_write_aliases(instance=instance, aliases=aliases, num_months=retention)
+        identify_missing_write_aliases.partial(
+            instance=instance,
+            aliases=aliases)(extract_ilm_setting(settings=fetch_alias_settings(alias=instance)))
+        return
 
 
     fetched_aliases = fetch_aliases()
     fetch_indices = fetch_indices()
 
     identify_indices_without_read_alias(fetch_indices, fetched_aliases)
-    aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
+    aa = aaaaaaaa.partial()
 
 
 fnv()
