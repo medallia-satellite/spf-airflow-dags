@@ -107,7 +107,7 @@ def fnv():
     def identify_missing_write_aliases(instance, aliases, num_months):
         regex = REGEX_MAPPING["write"]
 
-        write_aliases= {alias['alias']: alias["index"] for alias in alias_list if
+        write_aliases= {alias['alias']: alias["index"] for alias in aliases if
                 regex.fullmatch(alias['alias']) and alias["is_write_index"]}
 
         today = datetime.date.today()
