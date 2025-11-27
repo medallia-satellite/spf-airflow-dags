@@ -44,7 +44,7 @@ def aaaaaaaa():
     @task
     def fetch_indices():
         response = hook_get.run(
-            endpoint='/_cat/indices?h=index',
+            endpoint='/_cat/indices?h=index&format=json',
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
