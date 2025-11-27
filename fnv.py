@@ -60,10 +60,36 @@ def fnv():
         return [r["index"] for r in response.json() if BASE_REGEX.search(r["index"])]
 
     @task
+    def fetch_alias_settings(alias):
+        response = hook_get.run(
+            endpoint=f'/{alias}/_settings/'
+                     f'index.lifecycle.name,'
+                     f'index.lifecycle.rollover_alias',
+            headers={'Accept': 'application/json'},
+        )
+        hook_get.check_response(response)
+        return response.json()
+
+
+    @task
+    def extract_ilm_setting(settings):
+        il_list = [p["settings"]["index"]["lifecycle"] for _, p in settings.items()]
+
+        policies = set(il["name"] for il in il_list)
+        assert all(p in POLICY_MAPPING for p in policies), f"Invalid policies: {policies}"
+        assert len(set(POLICY_MAPPING.get(p) for p in policies)) == 1, f"Retention period is not unique: {policies}"
+
+        rollover_aliases = set(il["rollover_alias"] for il in il_list)
+        assert len(rollover_aliases) == 1, f"Rollover alias is not unique: {rollover_aliases}"
+
+        return next(iter(set(POLICY_MAPPING.get(p) for p in policies))), next(iter(rollover_aliases))
+
+
+    @task
     def identify_indices_without_read_alias(all_indices, all_aliases):
         indices_with_read_alias = [r["index"] for r in all_aliases if REGEX_MAPPING["read"].match(r["alias"])]
         indices_without_read_alias = [index for index in all_indices if index not in indices_with_read_alias]
-        assert len(indices_without_read_alias) == 1, f"Indices without read alias: {indices_with_read_alias=}"
+        assert len(indices_without_read_alias) == 0, f"Indices without read alias: {indices_without_read_alias=}"
 
 
     @task
@@ -77,12 +103,18 @@ def fnv():
         return [{"instance": k, "aliases": v} for k, v in grouped.items()]
 
 
+    @task_group
+    def aaaaaaaa(instance, aliases):
+        settings = fetch_alias_settings(alias=instance)
+        retention, rollover_alias = extract_ilm_setting(settings=settings)
+
+
     fetched_aliases = fetch_aliases()
     fetch_indices = fetch_indices()
 
     identify_indices_without_read_alias(fetch_indices, fetched_aliases)
+    aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
 
-    group_aliases_by_instance(fetched_aliases)
 
 
 fnv()
