@@ -73,6 +73,7 @@ def aaaaaaaa():
         assert len(iii) == len(aaa), "different len"
         for i in aaa:
             assert i in iii, f"{i} not in {iii}"
+            assert iii[iii.index(i)]["aliases"][i]["is_write_index"] is False
 
 
 
