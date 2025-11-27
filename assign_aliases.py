@@ -48,6 +48,7 @@ def aaaaaaaa():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
+        print(response.json())
         return [r["index"] for r in response.json() if BASE_REGEX.match(r["index"])][:10]
 
 
