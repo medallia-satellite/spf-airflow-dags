@@ -38,7 +38,7 @@ def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> I
     description="This is a POC",
     catchup=False,
 )
-def es_poc_dag():
+def aaaaaaaa():
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
     @task
@@ -81,4 +81,4 @@ def es_poc_dag():
     verify_alias.partial().expand_kwargs(group_indices_by_base(fetch_indices()))
 
 
-es_poc_dag()
+aaaaaaaa()
