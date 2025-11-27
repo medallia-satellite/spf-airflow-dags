@@ -103,19 +103,18 @@ def fnv():
             grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
         return [{"instance": k, "aliases": v} for k, v in grouped.items()]
 
-
     @task_group
     def aaaaaaaa(instance, aliases):
-        settings = fetch_alias_settings(alias=instance)
-        return extract_ilm_setting(settings=settings)
+        retention, rollover_alias = extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
+
+        return retention, rollover_alias
 
 
     fetched_aliases = fetch_aliases()
     fetch_indices = fetch_indices()
 
     identify_indices_without_read_alias(fetch_indices, fetched_aliases)
-    aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
-
+    aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
 
 
 fnv()
