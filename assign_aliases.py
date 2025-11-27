@@ -49,7 +49,7 @@ def aaaaaaaa():
         )
         hook_get.check_response(response)
         print(response.json())
-        return [r["index"] for r in response.json() if BASE_REGEX.match(r["index"])][:10]
+        return [r["index"] for r in response.json() if BASE_REGEX.search(r["index"])][:10]
 
 
     @task
@@ -65,7 +65,7 @@ def aaaaaaaa():
     def group_indices_by_base(indices: list) -> list:
         grouped = defaultdict(list)
         for index in indices:
-            grouped[BASE_REGEX.match(index).group(0)].append(index)
+            grouped[BASE_REGEX.search(index).group(0)].append(index)
         return [{"base_alias": k, "indices": v} for k, v in grouped.items()]
 
     @task
