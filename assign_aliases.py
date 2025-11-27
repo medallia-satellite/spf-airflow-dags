@@ -49,8 +49,7 @@ def aaaaaaaa():
         )
         hook_get.check_response(response)
         print(response.json())
-        return [r["index"] for r in response.json() if BASE_REGEX.search(r["index"])][:10]
-
+        return [r["index"] for r in response.json() if BASE_REGEX.search(r["index"])]
 
     @task
     def fetch_indices_in_alias(alias: list) -> list:
