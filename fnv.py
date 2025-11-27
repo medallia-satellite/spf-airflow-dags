@@ -83,7 +83,10 @@ def fnv():
         assert all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases), f"Invalid rollover alias: {rollover_aliases=}"
         assert len(rollover_aliases) == 1, f"Rollover alias is not unique: {rollover_aliases=}"
 
-        return next(iter(set(POLICY_MAPPING.get(p) for p in policies))), next(iter(rollover_aliases))
+        return {
+            "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
+            "rollover_alias": next(iter(rollover_aliases)),
+        }
 
 
     @task
