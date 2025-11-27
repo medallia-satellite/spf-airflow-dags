@@ -73,7 +73,7 @@ def aaaaaaaa():
         assert len(iii) == len(aaa), "different len"
         for i in aaa:
             assert i in iii, f"{i} not in {iii}"
-            assert iii[i]["aliases"][base_alias]["is_write_index"] is False
+            assert iii[i]["aliases"][base_alias]["is_write_index"] is False, f"{i} not read-only"
 
 
 
