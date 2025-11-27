@@ -64,9 +64,24 @@ def fnv():
         indices_with_read_alias = [r["index"] for r in all_aliases if REGEX_MAPPING["read"].match(r["alias"])]
         indices_without_read_alias = [index for index in all_indices if index not in indices_with_read_alias]
         assert len(indices_without_read_alias) == 1, f"{indices_without_read_alias=}"
-        assert len(all_indices) == len(indices_with_read_alias)
 
-    identify_indices_without_read_alias(fetch_indices(), fetch_aliases())
+
+    @task
+    def group_aliases_by_instance(all_aliases: list) -> list:
+        grouped = defaultdict(list)
+        for alias_entry in all_aliases:
+            alias = alias_entry["alias"]
+            if not any(r.fullmatch(alias) for r in REGEX_MAPPING.values()):
+                continue
+            grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
+        return [{"instance": k, "aliases": v} for k, v in grouped.items()]
+
+    fetched_aliases = fetch_aliases()
+    fetch_indices = fetch_indices()
+
+    identify_indices_without_read_alias(fetch_indices, fetched_aliases)
+
+    group_aliases_by_instance(fetched_aliases)
 
 
 fnv()
