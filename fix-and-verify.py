@@ -53,7 +53,19 @@ def es_poc_dag():
     @task
     def fetch_alias_settings(alias):
         response = hook_get.run(
-            endpoint=f'/{alias}/_settings/index.lifecycle.name,index.lifecycle.rollover_alias,index.analysis.filter.compound_capture.patterns',
+            endpoint=f'/{alias}/_settings/'
+                     f'index.lifecycle.name,'
+                     f'index.lifecycle.rollover_alias,'
+                     f'index.analysis.filter.compound_capture.patterns',
+            headers={'Accept': 'application/json'},
+        )
+        hook_get.check_response(response)
+        return response.json()
+
+    @task
+    def fetch_alias_mapping(alias):
+        response = hook_get.run(
+            endpoint=f'/{alias}/_mapping',
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
