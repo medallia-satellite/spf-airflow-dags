@@ -107,7 +107,8 @@ def fnv():
         return [{"instance": k, "aliases": v} for k, v in grouped.items()]
 
     @task
-    def identify_missing_write_aliases(instance, aliases, retention):
+    def identify_missing_write_aliases(instance, aliases, ilm_setting):
+        num_months = ilm_setting["retention"]
         regex = REGEX_MAPPING["write"]
 
         write_aliases= {alias['alias']: alias["index"] for alias in aliases if
@@ -117,17 +118,19 @@ def fnv():
         start_date = today.replace(day=1) + relativedelta(months=1)
 
         missing_aliases = []
-        for monthly_alias in monthly_aliases(instance, start_date, retention):
+        for monthly_alias in monthly_aliases(instance, start_date, num_months):
             if monthly_alias not in write_aliases:
                 missing_aliases.append(monthly_alias)
         return missing_aliases
 
     @task_group
     def aaaaaaaa(instance, aliases):
-        identify_missing_write_aliases.partial(
+        return identify_missing_write_aliases(
             instance=instance,
-            aliases=aliases)(extract_ilm_setting(settings=fetch_alias_settings(alias=instance)))
-        return
+            aliases=aliases,
+            ilm_setting=extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
+        )
+
 
 
     fetched_aliases = fetch_aliases()
