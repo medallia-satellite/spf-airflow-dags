@@ -59,17 +59,14 @@ def fnv():
         hook_get.check_response(response)
         return [r["index"] for r in response.json() if BASE_REGEX.search(r["index"])]
 
-
     @task
     def identify_indices_without_read_alias(all_indices, all_aliases):
-        indices_without_read_alias = []
         indices_with_read_alias = [r["index"] for r in all_aliases if REGEX_MAPPING["read"].match(r["alias"])]
-        print(indices_with_read_alias)
-        for index in all_indices:
-            if index not in indices_with_read_alias:
-                indices_without_read_alias.append(index)
-        return indices_without_read_alias
+        indices_without_read_alias = [index for index in all_indices if index not in indices_with_read_alias]
+        assert len(indices_without_read_alias) == 1, f"{indices_without_read_alias=}"
+        assert len(all_indices) == len(indices_with_read_alias)
 
     identify_indices_without_read_alias(fetch_indices(), fetch_aliases())
+
 
 fnv()
