@@ -106,7 +106,7 @@ def fnv():
     @task_group
     def aaaaaaaa(instance, aliases):
         settings = fetch_alias_settings(alias=instance)
-        retention, rollover_alias = extract_ilm_setting(settings=settings)
+        return extract_ilm_setting(settings=settings)
 
 
     fetched_aliases = fetch_aliases()
