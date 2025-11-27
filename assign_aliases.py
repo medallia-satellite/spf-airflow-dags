@@ -68,15 +68,14 @@ def aaaaaaaa():
         return [{"base_alias": k, "indices": v} for k, v in grouped.items()]
 
     @task
-    def aaaaaaa(iii, aaa):
-        assert len(iii) == len(aaa), "different len"
+    def aaaaaaa(base_alias, aaa):
+        assert len(fetch_indices_in_alias(alias=base_alias)) == len(aaa), "different len"
 
 
 
     @task_group
     def verify_alias(base_alias, indices):
-        indices_in_alias = fetch_indices_in_alias(alias=base_alias)
-        aaaaaaa(iii=indices_in_alias, aaa=indices)
+        aaaaaaa(base_alias=base_alias, aaa=indices)
 
     verify_alias.partial().expand_kwargs(group_indices_by_base(fetch_indices()))
 
