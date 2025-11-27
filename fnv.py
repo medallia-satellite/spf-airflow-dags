@@ -64,6 +64,7 @@ def fnv():
     def identify_indices_without_read_alias(all_indices, all_aliases):
         indices_without_read_alias = []
         indices_with_read_alias = [r["index"] for r in all_aliases if REGEX_MAPPING["read"].match(r["alias"])]
+        print(indices_with_read_alias)
         for index in all_indices:
             if index not in indices_with_read_alias:
                 indices_without_read_alias.append(index)
