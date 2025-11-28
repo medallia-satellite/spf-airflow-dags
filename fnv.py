@@ -83,7 +83,7 @@ def fnv():
     def extract_mapping(mappings):
         _mappings = mappings.values()
         sample = next(iter(_mappings))
-        assert all(m == sample for m in _mappings)
+        assert all(m == sample for m in _mappings), f"different mappings: {_mappings}"
         return sample
 
     @task
