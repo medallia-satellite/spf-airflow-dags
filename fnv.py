@@ -145,7 +145,8 @@ def fnv():
 
     @task(trigger_rule='all_done')
     def some_work(missing_aliases):
-        print(f"some_work on {missing_aliases}")
+        for alias in missing_aliases:
+            print(f"some_work on {alias}")
 
 
     @task_group
