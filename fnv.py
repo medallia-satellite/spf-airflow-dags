@@ -70,6 +70,19 @@ def fnv():
         hook_get.check_response(response)
         return response.json()
 
+    @task
+    def fetch_alias_mappings(alias):
+        response = hook_get.run(
+            endpoint=f'/{alias}/_mapping',
+            headers={'Accept': 'application/json'},
+        )
+        hook_get.check_response(response)
+        return response.json()
+
+    @task
+    def extract_mapping(mappings):
+        assert all(m == mappings[0] for m in mappings)
+        return set(mappings)
 
     @task
     def extract_ilm_setting(settings):
@@ -90,7 +103,7 @@ def fnv():
 
 
     @task
-    def identify_indices_without_read_alias(all_indices, all_aliases):
+    def assert_all_indices_have_read_alias(all_indices, all_aliases):
         indices_with_read_alias = [r["index"] for r in all_aliases if REGEX_MAPPING["read"].match(r["alias"])]
         indices_without_read_alias = [index for index in all_indices if index not in indices_with_read_alias]
         assert len(indices_without_read_alias) == 0, f"Indices without read alias: {indices_without_read_alias=}"
@@ -127,16 +140,20 @@ def fnv():
 
     @task_group
     def aaaaaaaa(instance, aliases):
+        ilm_setting = extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
+        mapping = extract_mapping(mappings=fetch_alias_mappings(alias=instance))
+
         return identify_missing_write_aliases(
             instance=instance,
             aliases=aliases,
-            ilm_setting=extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
+            ilm_setting=ilm_setting
         )
 
     fetched_aliases = fetch_aliases()
     fetched_indices = fetch_indices()
 
-    t_read_alias = identify_indices_without_read_alias(fetched_indices, fetched_aliases)
+    t_read_alias = assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
+
     aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
     t_read_alias >> aa
 
