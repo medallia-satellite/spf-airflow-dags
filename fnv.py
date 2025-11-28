@@ -139,6 +139,14 @@ def fnv():
                 missing_aliases.append(monthly_alias)
         return missing_aliases
 
+    @task.short_circuit
+    def needs_work(missing_aliases):
+        return True if missing_aliases else False
+
+    @task
+    def some_work(missing_aliases):
+        print(f"some_work on {missing_aliases}")
+
 
     @task_group
     def aaaaaaaa(instance, aliases):
@@ -157,6 +165,7 @@ def fnv():
     t_read_alias = assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
 
     aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
-    t_read_alias >> aa
+    bb = needs_work(aa)
+    cc = some_work(bb)
 
 fnv()
