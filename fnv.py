@@ -134,10 +134,10 @@ def fnv():
         )
 
     fetched_aliases = fetch_aliases()
-    fetch_indices = fetch_indices()
+    fetched_indices = fetch_indices()
 
-    identify_indices_without_read_alias(fetch_indices, fetched_aliases)
-
+    t_read_alias = identify_indices_without_read_alias(fetched_indices, fetched_aliases)
     aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
+    t_read_alias >> aa
 
 fnv()
