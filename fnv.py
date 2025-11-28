@@ -82,7 +82,8 @@ def fnv():
     @task
     def extract_mapping(mappings):
         _mappings = mappings.values()
-        assert all(m == _mappings[0] for m in _mappings)
+        sample = next(iter(_mappings))
+        assert all(m == sample for m in _mappings)
         return set(_mappings)
 
     @task
