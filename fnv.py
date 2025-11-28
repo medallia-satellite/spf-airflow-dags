@@ -153,8 +153,8 @@ def fnv():
     @task.branch
     def choose_branch(missing_aliases, t, f):
         if len(list(missing_aliases)) > 0:
-            return t
-        return f
+            return 'aaaaaaaa.task_a'
+        return 'aaaaaaaa.task_b'
 
 
 
@@ -168,7 +168,7 @@ def fnv():
             ilm_setting=ilm_setting
         )
 
-        branch = choose_branch(aaa, 'task_a', 'task_b')
+        branch = choose_branch(aaa)
         branch >> task_a(aaa)
         branch >> task_b()
 
