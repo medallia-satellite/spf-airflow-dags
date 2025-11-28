@@ -151,7 +151,7 @@ def fnv():
         print(f"OKAAA")
 
     @task.branch
-    def choose_branch(missing_aliases, t, f):
+    def choose_branch(missing_aliases):
         if len(list(missing_aliases)) > 0:
             return 'aaaaaaaa.task_a'
         return 'aaaaaaaa.task_b'
