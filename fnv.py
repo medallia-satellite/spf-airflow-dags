@@ -137,6 +137,7 @@ def fnv():
     fetch_indices = fetch_indices()
 
     identify_indices_without_read_alias(fetch_indices, fetched_aliases)
-    aa = aaaaaaaa.partial(map_index_template="{{ task.parameters['instance'] }}" ).expand_kwargs(group_aliases_by_instance(fetched_aliases))
+
+    aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
 
 fnv()
