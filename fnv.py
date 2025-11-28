@@ -137,13 +137,11 @@ def fnv():
         for monthly_alias in monthly_aliases(instance, start_date, num_months):
             if monthly_alias not in write_aliases:
                 missing_aliases.append(monthly_alias)
-        if not missing_aliases:
-            raise AssertionError("No missing aliases found")
         return missing_aliases
 
     @task.short_circuit
     def needs_work(missing_aliases):
-        return True if missing_aliases else False
+        return True if len(missing_aliases) == 0 else False
 
     @task
     def some_work(missing_aliases):
