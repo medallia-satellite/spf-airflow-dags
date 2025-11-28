@@ -139,7 +139,7 @@ def fnv():
                 missing_aliases.append(monthly_alias)
         return missing_aliases
 
-    @task.short_circuit
+    @task.short_circuit(trigger_rule='all_done')
     def needs_work(missing_aliases):
         return True if missing_aliases else False
 
@@ -152,21 +152,20 @@ def fnv():
     def aaaaaaaa(instance, aliases):
         ilm_setting = extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
         mapping = extract_mapping(mappings=fetch_alias_mappings(alias=instance))
-        aaa = identify_missing_write_aliases(
+
+        return identify_missing_write_aliases(
             instance=instance,
             aliases=aliases,
             ilm_setting=ilm_setting
         )
-        bb = needs_work(aaa)
-        cc = some_work(bb)
-        return cc
 
     fetched_aliases = fetch_aliases()
     fetched_indices = fetch_indices()
 
-
     t_read_alias = assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
 
     aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
+    bb = needs_work(aa)
+    cc = some_work(bb)
 
 fnv()
