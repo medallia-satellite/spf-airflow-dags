@@ -82,12 +82,12 @@ def fnv():
     @task
     def extract_mapping(mappings):
 
-        assert all(m == mappings.values()[0] for _, m in mappings.items())
+        assert all(m == mappings.values()[0] for m in mappings.values())
         return set(mappings.values())
 
     @task
     def extract_ilm_setting(settings):
-        il_list = [p["settings"]["index"]["lifecycle"] for _, p in settings.items()]
+        il_list = [s["settings"]["index"]["lifecycle"] for s in settings.values()]
 
         policies = set(il["name"] for il in il_list)
         assert all(p in POLICY_MAPPING for p in policies), f"Invalid policies: {policies=}"
