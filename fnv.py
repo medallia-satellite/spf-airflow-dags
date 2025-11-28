@@ -140,14 +140,22 @@ def fnv():
 
         return missing_aliases
 
-    @task.short_circuit
-    def needs_work(missing_aliases):
-        return len(list(missing_aliases)) > 0
-
     @task
-    def some_work(missing_aliases):
+    def task_a(missing_aliases):
         for alias in missing_aliases:
             print(f"some_work on {alias}")
+
+
+    @task
+    def task_b():
+        print(f"OKAAA")
+
+    @task.branch
+    def choose_branch(missing_aliases):
+        if len(list(missing_aliases)) > 0:
+            return task_a(missing_aliases)
+        return task_b()
+
 
 
     @task_group
@@ -159,9 +167,7 @@ def fnv():
             aliases=aliases,
             ilm_setting=ilm_setting
         )
-        bb = needs_work(aa)
-        cc = some_work(aa)
-        aa >> bb >> cc
+        choose_branch(aa)
 
     fetched_aliases = fetch_aliases()
     fetched_indices = fetch_indices()
