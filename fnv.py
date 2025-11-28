@@ -119,7 +119,7 @@ def fnv():
             if not any(r.fullmatch(alias) for r in REGEX_MAPPING.values()):
                 continue
             grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
-        return [{"instance": k, "aliases": v} for k, v in grouped.items() if "pkgdentest" in k or "athenademo_topic" in k]
+        return [{"instance": k, "aliases": v} for k, v in grouped.items()]
 
 
     @task
