@@ -140,21 +140,21 @@ def fnv():
 
         return missing_aliases
 
-    @task
+    @task(task_id="task_a")
     def task_a(missing_aliases):
         for alias in missing_aliases:
             print(f"some_work on {alias}")
 
 
-    @task
+    @task(task_id="task_b")
     def task_b():
         print(f"OKAAA")
 
     @task.branch
     def choose_branch(missing_aliases):
         if len(list(missing_aliases)) > 0:
-            return task_a(missing_aliases)
-        return task_b()
+            return 'task_a'
+        return 'task_b'
 
 
 
@@ -162,12 +162,16 @@ def fnv():
     def aaaaaaaa(instance, aliases):
         ilm_setting = extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
         mapping = extract_mapping(mappings=fetch_alias_mappings(alias=instance))
-        aa = identify_missing_write_aliases(
+        aaa = identify_missing_write_aliases(
             instance=instance,
             aliases=aliases,
             ilm_setting=ilm_setting
         )
-        choose_branch(aa)
+
+        branch = choose_branch(aaa)
+        branch >> task_a(aaa)
+        branch >> task_b()
+
 
     fetched_aliases = fetch_aliases()
     fetched_indices = fetch_indices()
