@@ -81,9 +81,9 @@ def fnv():
 
     @task
     def extract_mapping(mappings):
-
-        assert all(m == mappings.values()[0] for m in mappings.values())
-        return set(mappings.values())
+        _mappings = mappings.values()
+        assert all(m == _mappings[0] for m in _mappings)
+        return set(_mappings)
 
     @task
     def extract_ilm_setting(settings):
