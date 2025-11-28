@@ -137,6 +137,7 @@ def fnv():
         for monthly_alias in monthly_aliases(instance, start_date, num_months):
             if monthly_alias not in write_aliases:
                 missing_aliases.append(monthly_alias)
+        assert len(missing_aliases) == 0, f"Missing aliases: {missing_aliases=}"
         return missing_aliases
 
     @task.short_circuit
