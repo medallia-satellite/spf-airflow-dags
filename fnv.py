@@ -166,6 +166,8 @@ def fnv():
 
     aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
     bb = needs_work(aa)
-    cc = some_work(bb)
+    cc = some_work(aa)
+
+    t_read_alias >> aa >> bb >> cc
 
 fnv()
