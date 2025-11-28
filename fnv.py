@@ -106,7 +106,8 @@ def fnv():
             grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
         return [{"instance": k, "aliases": v} for k, v in grouped.items()]
 
-    @task
+
+    @task()
     def identify_missing_write_aliases(instance, aliases, ilm_setting):
         num_months = ilm_setting["retention"]
         regex = REGEX_MAPPING["write"]
@@ -123,7 +124,8 @@ def fnv():
                 missing_aliases.append(monthly_alias)
         return missing_aliases
 
-    @task_group(group_id="{{ instance }}")
+
+    @task_group
     def aaaaaaaa(instance, aliases):
         return identify_missing_write_aliases(
             instance=instance,
@@ -131,13 +133,10 @@ def fnv():
             ilm_setting=extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
         )
 
-
-
     fetched_aliases = fetch_aliases()
     fetch_indices = fetch_indices()
 
     identify_indices_without_read_alias(fetch_indices, fetched_aliases)
-    aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
-
+    aa = aaaaaaaa.partial(map_index_template="{{ task.parameters['instance'] }}" ).expand_kwargs(group_aliases_by_instance(fetched_aliases))
 
 fnv()
