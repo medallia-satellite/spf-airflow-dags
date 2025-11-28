@@ -143,7 +143,7 @@ def fnv():
     def needs_work(missing_aliases):
         return True if missing_aliases else False
 
-    @task
+    @task(trigger_rule='all_done')
     def some_work(missing_aliases):
         print(f"some_work on {missing_aliases}")
 
