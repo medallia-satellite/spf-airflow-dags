@@ -141,6 +141,7 @@ def fnv():
 
     @task.short_circuit
     def needs_work(missing_aliases):
+        print(list(missing_aliases))
         return len(list(missing_aliases)) > 0
 
     @task
