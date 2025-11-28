@@ -119,10 +119,10 @@ def fnv():
             if not any(r.fullmatch(alias) for r in REGEX_MAPPING.values()):
                 continue
             grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
-        return [{"instance": k, "aliases": v} for k, v in grouped.items()]
+        return [{"instance": k, "aliases": v} for k, v in grouped.items() if "pkgdentest" in k]
 
 
-    @task()
+    @task
     def identify_missing_write_aliases(instance, aliases, ilm_setting):
         num_months = ilm_setting["retention"]
         regex = REGEX_MAPPING["write"]
@@ -137,6 +137,7 @@ def fnv():
         for monthly_alias in monthly_aliases(instance, start_date, num_months):
             if monthly_alias not in write_aliases:
                 missing_aliases.append(monthly_alias)
+
         return missing_aliases
 
     @task.short_circuit
