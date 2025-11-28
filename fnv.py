@@ -84,7 +84,7 @@ def fnv():
         _mappings = mappings.values()
         sample = next(iter(_mappings))
         assert all(m == sample for m in _mappings)
-        return set(_mappings)
+        return sample
 
     @task
     def extract_ilm_setting(settings):
