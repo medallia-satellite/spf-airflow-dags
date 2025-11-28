@@ -123,7 +123,7 @@ def fnv():
                 missing_aliases.append(monthly_alias)
         return missing_aliases
 
-    @task_group(map_index_template="{{ instance }}")
+    @task_group(group_id="{{ instance }}")
     def aaaaaaaa(instance, aliases):
         return identify_missing_write_aliases(
             instance=instance,
