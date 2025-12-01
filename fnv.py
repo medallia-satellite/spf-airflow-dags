@@ -175,7 +175,7 @@ def fnv():
         branch = choose_branch(aaa)
         branch >> task_a(aaa)
         branch >> task_b()
-        return zip(task_a(aaa), mapping)
+        return ilm_setting
 
 
     fetched_aliases = fetch_aliases()
