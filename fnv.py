@@ -26,7 +26,6 @@ POLICY_MAPPING = {
 	"M36": 36,
 	"M36_rollover": 36,
 }
-AnotherResult = namedtuple('AnotherResult', ['success', 'error', 'instance', 'value'])
 
 class Result(TypedDict):
     success: bool
@@ -123,11 +122,11 @@ def fnv():
 
         if len(rollover_aliases) != 1:
             return failure("Invalid rollover alias {rollover_aliases=}")
-        s = success({
+
+        return success({
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
             "rollover_alias": next(iter(rollover_aliases)),
         })
-        return AnotherResult(success=True, error=None, instance=s["value"]["rollover_alias"], value=s["value"])
 
 
     @task
@@ -150,10 +149,10 @@ def fnv():
 
     @task
     def identify_missing_write_aliases(instance, aliases, ilm_setting):
-        if not ilm_setting.success:
-            return failure(ilm_setting.error)
+        if not ilm_setting["success"]:
+            return ilm_setting
 
-        num_months = ilm_setting.value["retention"]
+        num_months = ilm_setting["value"]["retention"]
         regex = REGEX_MAPPING["write"]
 
         write_aliases= {alias['alias']: alias["index"] for alias in aliases if
