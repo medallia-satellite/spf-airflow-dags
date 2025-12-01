@@ -90,6 +90,11 @@ def fnv():
     def extract_ilm_setting(settings):
         il_list = [s["settings"]["index"]["lifecycle"] for s in settings.values()]
 
+        if any("name" not in il for il in il_list):
+            return {
+                "success": False,
+                "message": f"No lifecycle policy {il_list=}"
+            }
         policies = set(il["name"] for il in il_list)
         if not all(p in POLICY_MAPPING for p in policies):
             return {
@@ -148,6 +153,7 @@ def fnv():
     def identify_missing_write_aliases(instance, aliases, ilm_setting):
         if not ilm_setting["success"]:
             return []
+
         num_months = ilm_setting["retention"]
         regex = REGEX_MAPPING["write"]
 
