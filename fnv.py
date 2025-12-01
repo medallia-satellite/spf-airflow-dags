@@ -3,7 +3,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pprint import pprint
-from typing import Iterator, Union, Any
+from typing import Iterator, Union, Any, Self
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
@@ -31,9 +31,16 @@ POLICY_MAPPING = {
 @dataclass(frozen=True)
 class Result:
     success: bool
-    message: Union[str, None] = None
+    error: Union[str, None] = None
     value: Any = None
 
+    @classmethod
+    def ok(cls, value) -> Self:
+        return cls(success=True, error=None, value=value)
+
+    @classmethod
+    def fail(cls, error: str) -> Self:
+        return cls(success=False, error=error, value=None)
 
 def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[str]:
     current_date = start_date
@@ -93,58 +100,36 @@ def fnv():
         _mappings = mappings.values()
         sample = next(iter(_mappings))
         if not all(m == sample for m in _mappings):
-            return {
-                "success": False,
-                "message": f"different mappings {_mappings}",
-            }
-        return {
-            "success": True,
-            "mapping": sample,
-        }
+            return Result.fail(f"different mappings {_mappings}")
+        return Result.ok(sample)
 
     @task
     def extract_ilm_setting(settings):
         il_list = [s["settings"]["index"]["lifecycle"] for s in settings.values()]
 
         if any("name" not in il for il in il_list):
-            return {
-                "success": False,
-                "message": f"No lifecycle policy {il_list=}"
-            }
+            return Result.fail(f"No lifecycle policy {il_list=}")
         policies = set(il["name"] for il in il_list)
         if not all(p in POLICY_MAPPING for p in policies):
-            return {
-                "success": False,
-                "message": f"Invalid policies: {policies=}"
-            }
+            return Result.fail(f"Invalid policies: {policies=}")
 
         if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-            return {
-                "success": False,
-                "message": f"Retention period is not unique: {policies=}"
-            }
+            return Result.fail(f"Retention period is not unique: {policies=}")
 
         if any("rollover_alias" not in il for il in il_list):
-            return {
-                "success": False,
-                "message": f"No rollover alias {il_list=}"
-            }
+            return Result.fail(f"No rollover alias {il_list=}")
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
         if not all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
-            return f"Invalid rollover alias {rollover_aliases=}"
+            return Result.fail(f"Invalid rollover alias {rollover_aliases=}")
 
         if len(rollover_aliases) != 1:
-            return {
-                "success": False,
-                "message": f"Invalid rollover alias {rollover_aliases=}"
-            }
+            return Result.fail("Invalid rollover alias {rollover_aliases=}")
 
-        return {
-            "success": True,
+        return Result.ok({
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
             "rollover_alias": next(iter(rollover_aliases)),
-        }
+        })
 
 
     @task
@@ -167,10 +152,10 @@ def fnv():
 
     @task
     def identify_missing_write_aliases(instance, aliases, ilm_setting):
-        if not ilm_setting["success"]:
-            return Result(success=False, message=ilm_setting["message"])
+        if not ilm_setting.success:
+            return ilm_setting
 
-        num_months = ilm_setting["retention"]
+        num_months = ilm_setting.value["retention"]
         regex = REGEX_MAPPING["write"]
 
         write_aliases= {alias['alias']: alias["index"] for alias in aliases if
@@ -184,7 +169,7 @@ def fnv():
             if monthly_alias not in write_aliases:
                 missing_aliases.append(monthly_alias)
 
-        return missing_aliases
+        return Result.ok(missing_aliases)
 
     @task(task_id="task_a")
     def task_a(missing_aliases):
