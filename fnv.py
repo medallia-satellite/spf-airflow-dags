@@ -83,8 +83,15 @@ def fnv():
     def extract_mapping(mappings):
         _mappings = mappings.values()
         sample = next(iter(_mappings))
-        assert all(m == sample for m in _mappings), f"different mappings: {_mappings}"
-        return sample
+        if not all(m == sample for m in _mappings):
+            return {
+                "success": False,
+                "message": f"different mappings {_mappings}",
+            }
+        return {
+            "success": True,
+            "mapping": sample,
+        }
 
     @task
     def extract_ilm_setting(settings):
