@@ -171,6 +171,7 @@ def fnv():
         branch = choose_branch(aaa)
         branch >> task_a(aaa)
         branch >> task_b()
+        return zip(task_a(aaa), mapping)
 
 
     fetched_aliases = fetch_aliases()
