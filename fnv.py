@@ -91,14 +91,36 @@ def fnv():
         il_list = [s["settings"]["index"]["lifecycle"] for s in settings.values()]
 
         policies = set(il["name"] for il in il_list)
-        #assert all(p in POLICY_MAPPING for p in policies), f"Invalid policies: {policies=}"
-        #assert len(set(POLICY_MAPPING.get(p) for p in policies)) == 1, f"Retention period is not unique: {policies=}"
+        if not all(p in POLICY_MAPPING for p in policies):
+            return {
+                "success": False,
+                "message": f"Invalid policies: {policies=}"
+            }
+
+        if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
+            return {
+                "success": False,
+                "message": f"Retention period is not unique: {policies=}"
+            }
+
+        if any("rollover_alias" not in il for il in il_list):
+            return {
+                "success": False,
+                "message": f"No rollover alias {il_list=}"
+            }
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
-        #assert all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases), f"Invalid rollover alias: {rollover_aliases=}"
-        #assert len(rollover_aliases) == 1, f"Rollover alias is not unique: {rollover_aliases=}"
+        if not all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
+            return f"Invalid rollover alias {rollover_aliases=}"
+
+        if len(rollover_aliases) != 1:
+            return {
+                "success": False,
+                "message": f"Invalid rollover alias {rollover_aliases=}"
+            }
 
         return {
+            "success": True,
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
             "rollover_alias": next(iter(rollover_aliases)),
         }
@@ -124,6 +146,8 @@ def fnv():
 
     @task
     def identify_missing_write_aliases(instance, aliases, ilm_setting):
+        if not ilm_setting["success"]:
+            return []
         num_months = ilm_setting["retention"]
         regex = REGEX_MAPPING["write"]
 
