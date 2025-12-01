@@ -157,6 +157,10 @@ def fnv():
         return 'aaaaaaaa.task_b'
 
 
+    @task
+    def collector(results):
+        print("Collected:", results)
+        return results
 
     @task_group
     def aaaaaaaa(instance, aliases):
@@ -182,5 +186,7 @@ def fnv():
     aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
 
     t_read_alias >> aa
+    # collect ALL results into one list automatically
+    collector(aa)
 
 fnv()
