@@ -1,9 +1,9 @@
 import datetime
 import re
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from pprint import pprint
-from typing import Iterator, Union, Any
+from typing import Iterator, Union, Any, TypedDict, Dict, Optional
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
@@ -27,20 +27,17 @@ POLICY_MAPPING = {
 	"M36_rollover": 36,
 }
 
-
-@dataclass(frozen=True)
-class Result:
+class Result(TypedDict):
     success: bool
-    error: Union[str, None] = None
-    value: Any = None
+    error: Optional[str]
+    value: Optional[Any]
 
-    @classmethod
-    def ok(cls, value):
-        return cls(success=True, error=None, value=value)
+def success(value: Any) -> Result:
+    return Result(success=True, error=None, value=value)
 
-    @classmethod
-    def fail(cls, error: str):
-        return cls(success=False, error=error, value=None)
+def failure(error: str) -> Result:
+        return Result(success=False, error=error, value=None)
+
 
 def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[str]:
     current_date = start_date
@@ -100,33 +97,33 @@ def fnv():
         _mappings = mappings.values()
         sample = next(iter(_mappings))
         if not all(m == sample for m in _mappings):
-            return Result.fail(f"different mappings {_mappings}")
-        return Result.ok(sample)
+            return failure(f"different mappings {_mappings}")
+        return success(sample)
 
     @task
     def extract_ilm_setting(settings):
         il_list = [s["settings"]["index"]["lifecycle"] for s in settings.values()]
 
         if any("name" not in il for il in il_list):
-            return Result.fail(f"No lifecycle policy {il_list=}")
+            return failure(f"No lifecycle policy {il_list=}")
         policies = set(il["name"] for il in il_list)
         if not all(p in POLICY_MAPPING for p in policies):
-            return Result.fail(f"Invalid policies: {policies=}")
+            return failure(f"Invalid policies: {policies=}")
 
         if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-            return Result.fail(f"Retention period is not unique: {policies=}")
+            return failure(f"Retention period is not unique: {policies=}")
 
         if any("rollover_alias" not in il for il in il_list):
-            return Result.fail(f"No rollover alias {il_list=}")
+            return failure(f"No rollover alias {il_list=}")
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
         if not all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
-            return Result.fail(f"Invalid rollover alias {rollover_aliases=}")
+            return failure(f"Invalid rollover alias {rollover_aliases=}")
 
         if len(rollover_aliases) != 1:
-            return Result.fail("Invalid rollover alias {rollover_aliases=}")
+            return failure("Invalid rollover alias {rollover_aliases=}")
 
-        return Result.ok({
+        return success({
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
             "rollover_alias": next(iter(rollover_aliases)),
         })
@@ -152,10 +149,10 @@ def fnv():
 
     @task
     def identify_missing_write_aliases(instance, aliases, ilm_setting):
-        if not ilm_setting.success:
+        if not ilm_setting["success"]:
             return ilm_setting
 
-        num_months = ilm_setting.value["retention"]
+        num_months = ilm_setting["value"]["retention"]
         regex = REGEX_MAPPING["write"]
 
         write_aliases= {alias['alias']: alias["index"] for alias in aliases if
@@ -169,7 +166,7 @@ def fnv():
             if monthly_alias not in write_aliases:
                 missing_aliases.append(monthly_alias)
 
-        return Result.ok(missing_aliases)
+        return success(missing_aliases)
 
     @task(task_id="task_a")
     def task_a(missing_aliases):
@@ -183,7 +180,7 @@ def fnv():
 
     @task.branch
     def choose_branch(missing_aliases):
-        if missing_aliases.success and len(list(missing_aliases.value)) > 0:
+        if missing_aliases["success"] and len(list(missing_aliases["value"])) > 0:
             return 'aaaaaaaa.task_a'
         return 'aaaaaaaa.task_b'
 
