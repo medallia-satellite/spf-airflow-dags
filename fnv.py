@@ -183,14 +183,15 @@ def fnv():
 
     @task.branch
     def choose_branch(missing_aliases):
-        if len(list(missing_aliases)) > 0:
+        if len(list(missing_aliases.)) > 0:
             return 'aaaaaaaa.task_a'
         return 'aaaaaaaa.task_b'
 
 
     @task
     def collector(results):
-        print("Collected:", results)
+        for r in results:
+            print(f"Collected: {r}")
         return results
 
     @task_group
