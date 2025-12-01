@@ -3,7 +3,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pprint import pprint
-from typing import Iterator, Union, Any, Self
+from typing import Iterator, Union, Any
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
@@ -35,11 +35,11 @@ class Result:
     value: Any = None
 
     @classmethod
-    def ok(cls, value) -> Self:
+    def ok(cls, value):
         return cls(success=True, error=None, value=value)
 
     @classmethod
-    def fail(cls, error: str) -> Self:
+    def fail(cls, error: str):
         return cls(success=False, error=error, value=None)
 
 def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[str]:
