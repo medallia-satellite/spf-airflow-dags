@@ -183,7 +183,7 @@ def fnv():
 
     @task.branch
     def choose_branch(missing_aliases):
-        if len(list(missing_aliases.value)) > 0:
+        if missing_aliases.success and len(list(missing_aliases.value)) > 0:
             return 'aaaaaaaa.task_a'
         return 'aaaaaaaa.task_b'
 
