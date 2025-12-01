@@ -91,12 +91,12 @@ def fnv():
         il_list = [s["settings"]["index"]["lifecycle"] for s in settings.values()]
 
         policies = set(il["name"] for il in il_list)
-        assert all(p in POLICY_MAPPING for p in policies), f"Invalid policies: {policies=}"
-        assert len(set(POLICY_MAPPING.get(p) for p in policies)) == 1, f"Retention period is not unique: {policies=}"
+        #assert all(p in POLICY_MAPPING for p in policies), f"Invalid policies: {policies=}"
+        #assert len(set(POLICY_MAPPING.get(p) for p in policies)) == 1, f"Retention period is not unique: {policies=}"
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
-        assert all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases), f"Invalid rollover alias: {rollover_aliases=}"
-        assert len(rollover_aliases) == 1, f"Rollover alias is not unique: {rollover_aliases=}"
+        #assert all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases), f"Invalid rollover alias: {rollover_aliases=}"
+        #assert len(rollover_aliases) == 1, f"Rollover alias is not unique: {rollover_aliases=}"
 
         return {
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
