@@ -1,8 +1,9 @@
 import datetime
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from pprint import pprint
-from typing import Iterator
+from typing import Iterator, Union, Any
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
@@ -25,6 +26,14 @@ POLICY_MAPPING = {
 	"M36": 36,
 	"M36_rollover": 36,
 }
+
+
+@dataclass(frozen=True)
+class Result:
+    success: bool
+    message: Union[str, None] = None
+    value: Any = None
+
 
 def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[str]:
     current_date = start_date
@@ -159,7 +168,7 @@ def fnv():
     @task
     def identify_missing_write_aliases(instance, aliases, ilm_setting):
         if not ilm_setting["success"]:
-            return []
+            return Result(success=False, message=ilm_setting["message"])
 
         num_months = ilm_setting["retention"]
         regex = REGEX_MAPPING["write"]
