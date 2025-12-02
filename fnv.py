@@ -84,7 +84,7 @@ def fnv():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
-        return success(instance=alias, value=response.json().values())
+        return success(instance=alias, value=list(response.json().values()))
 
     @task
     def fetch_alias_mappings(alias):
@@ -94,7 +94,7 @@ def fnv():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
-        return success(instance=alias, value=response.json().values())
+        return success(instance=alias, value=list(response.json().values()))
 
     @task
     def extract_mapping(input_data):
