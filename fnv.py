@@ -146,21 +146,25 @@ def fnv():
 
 
     @task
-    def group_aliases_by_instance(all_aliases: list) -> list:
+    def group_aliases_by_instance(all_aliases: list):
         grouped = defaultdict(list)
         for alias_entry in all_aliases:
             alias = alias_entry["alias"]
             if not any(r.fullmatch(alias) for r in REGEX_MAPPING.values()):
                 continue
             grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
-        return [{"instance": k, "aliases": v} for k, v in grouped.items()]
+
+        context = get_current_context()
+        ti = context["ti"]
+        ti.xcom_push("aliases", grouped)
+        return [k for k in grouped.keys()]
 
 
     def retrieve_aliases(instance):
         context = get_current_context()
         ti = context["ti"]
-        aaa = ti.xcom_pull(task_ids="group_aliases_by_instance")
-        return [e for e in aaa if e["instance"] == instance][0]["aliases"]
+        aaa = ti.xcom_pull(task_ids="group_aliases_by_instance", key="aliases")
+        return aaa[instance]
 
     @task
     def identify_missing_write_aliases(input_data):
@@ -211,11 +215,15 @@ def fnv():
 
     @task_group
     def validate_lifecycle_settings(instance):
-        return extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
+        return extract_ilm_setting(
+            settings=fetch_alias_settings(alias=instance)
+        )
 
     @task_group
     def validate_mappings(instance):
-        return extract_mapping(mappings=fetch_alias_mappings(alias=instance))
+        return extract_mapping(
+            mappings=fetch_alias_mappings(alias=instance)
+        )
 
     fetched_aliases = fetch_aliases()
     fetched_indices = fetch_indices()
@@ -223,20 +231,8 @@ def fnv():
     t_read_alias = assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
 
     grouped = group_aliases_by_instance(fetched_aliases)
-    a = collector.override(task_id="collect_validate_lifecycle_settings")(validate_lifecycle_settings.partial().expand_kwargs(grouped))
-    collector.override(task_id="collect_validate_mappings")(validate_mappings.partial().expand_kwargs(grouped))
+    a = collector.override(task_id="collect_validate_lifecycle_settings")(validate_lifecycle_settings.expand(instance=grouped))
+    collector.override(task_id="collect_validate_mappings")(validate_mappings.expand(instance=grouped))
     collector.override(task_id="collect_identify_missing_write_aliases")(identify_missing_write_aliases.expand(input_data=a))
 
 fnv()
-
-#aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
-
-# aaa = identify_missing_write_aliases(
-#     instance=instance,
-#     aliases=aliases,
-#     ilm_setting=ilm_setting
-# )
-
-# branch = choose_branch(aaa)
-# branch >> task_a(aaa)
-# branch >> task_b()
