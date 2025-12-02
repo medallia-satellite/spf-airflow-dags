@@ -192,17 +192,14 @@ def fnv():
 
     @task
     def collector(results):
-        for r in results:
-            if not r["success"]:
-                print(f"{r['instance']} - error: {r['error']}")
         return [r for r in results if r["success"] and r["value"]]
 
 
     @task
-    def collector2(input_data):
-        return {r['instance']: r['error'] for r in input_data if not r["success"]}
-
-
+    def print_errors(input_data):
+        results = {r['instance']: r['error'] for r in input_data if not r["success"]}
+        pprint(results)
+        return results
 
     @task_group
     def validate_lifecycle_settings(instance):
