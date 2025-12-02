@@ -195,16 +195,8 @@ def fnv():
         for r in results:
             if not r["success"]:
                 print(f"{r['instance']} - error: {r['error']}")
-        return [r for r in results if r["success"]]
+        return [r for r in results if r["success"] and r["value"]]
 
-    @task
-    def merge(input_data):
-        failed = zip([d["instance"] for d in input_data if not d["success"]])
-        for d in input_data:
-            if not d["success"]:
-                print(f"{d['instance']} - error: {d['error']}")
-
-        return
 
 
 
