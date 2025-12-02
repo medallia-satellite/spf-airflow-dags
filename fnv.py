@@ -29,14 +29,15 @@ POLICY_MAPPING = {
 
 class Result(TypedDict):
     success: bool
+    instance: str
     error: Optional[str]
     value: Optional[Any]
 
-def success(value: Any) -> Result:
-    return Result(success=True, error=None, value=value)
+def success(instance: str, value: Any) -> Result:
+    return Result(success=True, instance=instance, error=None, value=value)
 
-def failure(error: str) -> Result:
-    return Result(success=False, error=error, value=None)
+def failure(instance: str, error: str) -> Result:
+    return Result(success=False, instance=instance, error=error, value=None)
 
 
 def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[str]:
@@ -81,7 +82,7 @@ def fnv():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
-        return response.json()
+        return success(instance=alias, value=response.json())
 
     @task
     def fetch_alias_mappings(alias):
@@ -90,19 +91,25 @@ def fnv():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
-        return response.json()
+        return success(instance=alias, value=response.json())
 
     @task
     def extract_mapping(mappings):
-        _mappings = mappings.values()
+        if not mappings["success"]:
+            return mappings
+
+        _mappings = mappings["value"].values()
         sample = next(iter(_mappings))
         if not all(m == sample for m in _mappings):
             return failure(f"different mappings {_mappings}")
-        return success(sample)
+        return success(instance=mappings["instance"], value=sample)
 
     @task
     def extract_ilm_setting(settings):
-        il_list = [s["settings"]["index"]["lifecycle"] for s in settings.values()]
+
+        if not settings["success"]:
+            return settings
+        il_list = [s["settings"]["index"]["lifecycle"] for s in settings["value"].values()]
 
         if any("name" not in il for il in il_list):
             return failure(f"No lifecycle policy {il_list=}")
@@ -123,7 +130,7 @@ def fnv():
         if len(rollover_aliases) != 1:
             return failure("Invalid rollover alias {rollover_aliases=}")
 
-        return success({
+        return success(instance=settings["instance"], value={
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
             "rollover_alias": next(iter(rollover_aliases)),
         })
@@ -166,7 +173,7 @@ def fnv():
             if monthly_alias not in write_aliases:
                 missing_aliases.append(monthly_alias)
 
-        return success(missing_aliases)
+        return success(instance=instance, value=missing_aliases)
 
     @task(task_id="task_a")
     def task_a(missing_aliases):
