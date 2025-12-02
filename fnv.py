@@ -161,7 +161,7 @@ def fnv():
         context = get_current_context()
         ti = context["ti"]
         ti.xcom_push("aliases", grouped)
-        return [success(instance=k, value="") for k in grouped.keys()]
+        return [success(instance=k, value=v) for k, v in grouped.items()]
 
 
     def retrieve_aliases(instance):
