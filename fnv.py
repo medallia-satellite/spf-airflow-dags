@@ -197,7 +197,7 @@ def fnv():
     def collector(results):
         for r in results:
             print(f"Collected: {r}")
-        return {success: [r for r in results if r["success"]], failure: [r for r in results if not r["success"]]}
+        return {"success": [r for r in results if r["success"]], "failure": [r for r in results if not r["success"]]}
 
 
     @task
