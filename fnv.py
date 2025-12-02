@@ -101,7 +101,7 @@ def fnv():
         _mappings = mappings["value"].values()
         sample = next(iter(_mappings))
         if not all(m == sample for m in _mappings):
-            return failure(f"different mappings {_mappings}")
+            return failure(instance=mappings["instance"], error=f"different mappings {_mappings}")
         return success(instance=mappings["instance"], value=sample)
 
     @task
@@ -112,23 +112,23 @@ def fnv():
         il_list = [s["settings"]["index"]["lifecycle"] for s in settings["value"].values()]
 
         if any("name" not in il for il in il_list):
-            return failure(f"No lifecycle policy {il_list=}")
+            return failure(instance=settings["instance"], error=f"No lifecycle policy {il_list=}")
         policies = set(il["name"] for il in il_list)
         if not all(p in POLICY_MAPPING for p in policies):
-            return failure(f"Invalid policies: {policies=}")
+            return failure(instance=settings["instance"], error=f"Invalid policies: {policies=}")
 
         if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-            return failure(f"Retention period is not unique: {policies=}")
+            return failure(instance=settings["instance"], error=f"Retention period is not unique: {policies=}")
 
         if any("rollover_alias" not in il for il in il_list):
-            return failure(f"No rollover alias {il_list=}")
+            return failure(instance=settings["instance"], error=f"No rollover alias {il_list=}")
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
         if not all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
-            return failure(f"Invalid rollover alias {rollover_aliases=}")
+            return failure(instance=settings["instance"], error=f"Invalid rollover alias {rollover_aliases=}")
 
         if len(rollover_aliases) != 1:
-            return failure("Invalid rollover alias {rollover_aliases=}")
+            return failure(instance=settings["instance"], error="Invalid rollover alias {rollover_aliases=}")
 
         return success(instance=settings["instance"], value={
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
