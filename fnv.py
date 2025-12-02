@@ -1,4 +1,5 @@
 import datetime
+import json
 import re
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
@@ -198,7 +199,7 @@ def fnv():
     @task
     def print_errors(input_data):
         results = {r['instance']: r['error'] for r in input_data if not r["success"]}
-        pprint(results)
+        print(json.dumps(results, indent=2))
         return results
 
     @task_group
