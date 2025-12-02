@@ -160,13 +160,13 @@ def fnv():
         context = get_current_context()
         ti = context["ti"]
         aaa = ti.xcom_pull(task_ids="group_aliases_by_instance")
-        return [e for e in aaa if e["instance"] == instance][0]
+        return [e for e in aaa if e["instance"] == instance][0]["aliases"]
 
     @task
     def identify_missing_write_aliases(input_data):
         instance = input_data["instance"]
         aliases = retrieve_aliases(instance)
-        print(f"Found {len(aliases)} aliases for {instance}")
+        print(f"Found {aliases} aliases for {instance}")
 
         num_months = input_data["value"]["retention"]
         regex = REGEX_MAPPING["write"]
