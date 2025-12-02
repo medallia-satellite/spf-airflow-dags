@@ -223,11 +223,11 @@ def fnv():
 
     m = validate_mappings.expand(instance=instances)
     a = collector.override(task_id="collect_validate_mappings")(m)
-    print_errors(m)
+    print_errors.override(task_id="print_mapping_errors")(m)
 
     s = validate_lifecycle_settings.expand(instance=a)
     b = collector.override(task_id="collect_validate_lifecycle_settings")(s)
-    print_errors(s)
+    print_errors.override(task_id="print_lifecycle_setting_errors")(s)
 
     collector.override(task_id="collect_identify_missing_write_aliases")(identify_missing_write_aliases.expand(input_data=b))
 
