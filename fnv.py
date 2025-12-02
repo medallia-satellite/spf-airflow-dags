@@ -223,13 +223,13 @@ def fnv():
 
     instances = group_aliases_by_instance(fetched_aliases)
 
-    mappings = validate_mappings.expand(instance=instances)
-    a = collector.override(task_id="collect_validate_mappings")(mappings)
-    collector2(mappings)
+    m = validate_mappings.expand(instance=instances)
+    a = collector.override(task_id="collect_validate_mappings")(m)
+    collector2(m)
 
-    settings = validate_lifecycle_settings.expand(instance=a)
-    b = collector.override(task_id="collect_validate_lifecycle_settings")(settings)
-    collector2(settings)
+    s = validate_lifecycle_settings.expand(instance=a)
+    b = collector.override(task_id="collect_validate_lifecycle_settings")(s)
+    collector2(s)
 
     collector.override(task_id="collect_identify_missing_write_aliases")(identify_missing_write_aliases.expand(input_data=b))
 
