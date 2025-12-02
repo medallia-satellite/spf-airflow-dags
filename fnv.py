@@ -200,7 +200,7 @@ def fnv():
 
     @task
     def print_errors(input_data):
-        results = {d['instance']: d['error'] for d in input_data if not r["success"]}
+        results = {d['instance']: d['error'] for d in input_data if not d["success"]}
         print(f"Errors found: {len(results)}")
         print(json.dumps(results, indent=2))
         return results
