@@ -223,9 +223,9 @@ def fnv():
     t_read_alias = assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
 
     grouped = group_aliases_by_instance(fetched_aliases)
-    a = collector(validate_lifecycle_settings.partial().expand_kwargs(grouped)).override(task_id="collect_validate_lifecycle_settings")
-    collector(validate_mappings.partial().expand_kwargs(grouped)).override(task_id="collect_validate_mappings")
-    collector(identify_missing_write_aliases.expand(input_data=a)).override(task_id="collect_identify_missing_write_aliases")
+    a = collector.override(task_id="collect_validate_lifecycle_settings")(validate_lifecycle_settings.partial().expand_kwargs(grouped))
+    collector.override(task_id="collect_validate_mappings")(validate_mappings.partial().expand_kwargs(grouped))
+    collector.override(task_id="collect_identify_missing_write_aliases")(identify_missing_write_aliases.expand(input_data=a))
 
 fnv()
 
