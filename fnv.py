@@ -192,13 +192,15 @@ def fnv():
         return success(instance=instance, value=missing_aliases)
 
     @task
-    def collector(results):
-        return [r for r in results if r["success"] and r["value"]]
+    def collector(input_data):
+        results = [d for d in input_data if d["success"] and d["value"]]
+        print(f"Collected {len(results)} successes.")
+        return results
 
 
     @task
     def print_errors(input_data):
-        results = {r['instance']: r['error'] for r in input_data if not r["success"]}
+        results = {d['instance']: d['error'] for d in input_data if not r["success"]}
         print(f"Errors found: {len(results)}")
         print(json.dumps(results, indent=2))
         return results
