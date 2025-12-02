@@ -176,54 +176,64 @@ def fnv():
 
         return success(instance=instance, value=missing_aliases)
 
-    @task(task_id="task_a")
-    def task_a(missing_aliases):
-        for alias in missing_aliases:
-            print(f"some_work on {alias}")
-
-
-    @task(task_id="task_b")
-    def task_b():
-        print(f"OKAAA")
-
-    @task.branch
-    def choose_branch(missing_aliases):
-        if missing_aliases["success"] and len(list(missing_aliases["value"])) > 0:
-            return 'aaaaaaaa.task_a'
-        return 'aaaaaaaa.task_b'
+    # @task(task_id="task_a")
+    # def task_a(missing_aliases):
+    #     for alias in missing_aliases:
+    #         print(f"some_work on {alias}")
+    #
+    #
+    # @task(task_id="task_b")
+    # def task_b():
+    #     print(f"OKAAA")
+    #
+    # @task.branch
+    # def choose_branch(missing_aliases):
+    #     if missing_aliases["success"] and len(list(missing_aliases["value"])) > 0:
+    #         return 'aaaaaaaa.task_a'
+    #     return 'aaaaaaaa.task_b'
 
 
     @task
     def collector(results):
         for r in results:
             print(f"Collected: {r}")
+        return {success: [r for r in results if r["success"]], failure: [r for r in results if not r["success"]]}
+
+
+    @task
+    def merge(results):
+        for r in results:
+            print(f"Collected: {r}")
         return results
 
+
     @task_group
-    def aaaaaaaa(instance, aliases):
-        ilm_setting = extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
-        mapping = extract_mapping(mappings=fetch_alias_mappings(alias=instance))
-        aaa = identify_missing_write_aliases(
-            instance=instance,
-            aliases=aliases,
-            ilm_setting=ilm_setting
-        )
+    def validate_lifecycle_settings(instance):
+        return extract_ilm_setting(settings=fetch_alias_settings(alias=instance))
 
-        branch = choose_branch(aaa)
-        branch >> task_a(aaa)
-        branch >> task_b()
-        return ilm_setting
-
+    @task_group
+    def validate_mappings(instance):
+        return extract_mapping(mappings=fetch_alias_mappings(alias=instance))
 
     fetched_aliases = fetch_aliases()
     fetched_indices = fetch_indices()
 
     t_read_alias = assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
 
-    aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
-
-    t_read_alias >> aa
-    # collect ALL results into one list automatically
-    collector(aa)
+    grouped = group_aliases_by_instance(fetched_aliases)
+    collector(validate_lifecycle_settings.partial().expand_kwargs(grouped))
+    collector(validate_mappings.partial().expand_kwargs(grouped))
 
 fnv()
+
+#aa = aaaaaaaa.partial().expand_kwargs(group_aliases_by_instance(fetched_aliases))
+
+# aaa = identify_missing_write_aliases(
+#     instance=instance,
+#     aliases=aliases,
+#     ilm_setting=ilm_setting
+# )
+
+# branch = choose_branch(aaa)
+# branch >> task_a(aaa)
+# branch >> task_b()
