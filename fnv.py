@@ -76,6 +76,7 @@ def fnv():
 
     @task
     def fetch_alias_settings(alias):
+        alias = alias["instance"]
         response = hook_get.run(
             endpoint=f'/{alias}/_settings/'
                      f'index.lifecycle.name,'
@@ -87,6 +88,7 @@ def fnv():
 
     @task
     def fetch_alias_mappings(alias):
+        alias = alias["instance"]
         response = hook_get.run(
             endpoint=f'/{alias}/_mapping',
             headers={'Accept': 'application/json'},
