@@ -1,11 +1,13 @@
 import datetime
 import re
-from collections import defaultdict
-from typing import Iterator, Any, TypedDict, Optional
+from collections import defaultdict, namedtuple
+from dataclasses import dataclass
+from pprint import pprint
+from typing import Iterator, Union, Any, TypedDict, Dict, Optional
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
-from click import get_current_context
+from airflow.operators.python import get_current_context
 from dateutil.relativedelta import relativedelta
 
 BASE_PATTERN = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
@@ -153,13 +155,17 @@ def fnv():
             grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
         return [{"instance": k, "aliases": v} for k, v in grouped.items()]
 
-    @task
-    def identify_missing_write_aliases(input_data):
-        instance = input_data["instance"]
+
+    def retrieve_aliases(instance):
         context = get_current_context()
         ti = context["ti"]
         aaa = ti.xcom_pull(task_ids="group_aliases_by_instance")
-        aliases = [e for e in aaa if e["instance"] == instance]
+        return [e for e in aaa if e["instance"] == instance]
+
+    @task
+    def identify_missing_write_aliases(input_data):
+        instance = input_data["instance"]
+        aliases = retrieve_aliases(instance)
 
         num_months = input_data["value"]["retention"]
         regex = REGEX_MAPPING["write"]
