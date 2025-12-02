@@ -200,16 +200,11 @@ def fnv():
     #         return 'aaaaaaaa.task_a'
     #     return 'aaaaaaaa.task_b'
 
-
     @task
     def collector(results):
         for r in results:
-            print(f"Collected: {r}")
-        return {"success": [r for r in results if r["success"]], "failure": [r for r in results if not r["success"]]}
-
-
-    @task
-    def collector2(results):
+            if not r["success"]:
+                print(f"{r['instance']} - error: {r['error']}")
         return [r for r in results if r["success"]]
 
 
@@ -228,7 +223,7 @@ def fnv():
     t_read_alias = assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
 
     grouped = group_aliases_by_instance(fetched_aliases)
-    a = collector2(validate_lifecycle_settings.partial().expand_kwargs(grouped))
+    a = collector(validate_lifecycle_settings.partial().expand_kwargs(grouped))
     collector(validate_mappings.partial().expand_kwargs(grouped))
     identify_missing_write_aliases.expand(input_data=a)
 
