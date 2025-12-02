@@ -113,6 +113,7 @@ def fnv():
 
         if any("name" not in il for il in il_list):
             return failure(instance=settings["instance"], error=f"No lifecycle policy {il_list=}")
+
         policies = set(il["name"] for il in il_list)
         if not all(p in POLICY_MAPPING for p in policies):
             return failure(instance=settings["instance"], error=f"Invalid policies: {policies=}")
@@ -121,7 +122,7 @@ def fnv():
             return failure(instance=settings["instance"], error=f"Retention period is not unique: {policies=}")
 
         if any("rollover_alias" not in il for il in il_list):
-            return failure(instance=settings["instance"], error=f"No rollover alias {il_list=}")
+            return failure(instance=settings["instance"], error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
         if not all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
