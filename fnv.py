@@ -209,13 +209,13 @@ def fnv():
     @task_group
     def validate_lifecycle_settings(instance):
         return extract_ilm_setting(
-            settings=fetch_alias_settings(alias=instance["instance"])
+            settings=fetch_alias_settings(alias=instance)
         )
 
     @task_group
     def validate_mappings(instance):
         return extract_mapping(
-            mappings=fetch_alias_mappings(alias=instance["instance"])
+            mappings=fetch_alias_mappings(alias=instance)
         )
 
     fetched_aliases = fetch_aliases()
