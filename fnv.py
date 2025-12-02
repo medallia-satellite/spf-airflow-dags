@@ -7,6 +7,7 @@ from typing import Iterator, Union, Any, TypedDict, Dict, Optional
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
+from click import get_current_context
 from dateutil.relativedelta import relativedelta
 
 BASE_PATTERN = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
@@ -155,12 +156,18 @@ def fnv():
         return [{"instance": k, "aliases": v} for k, v in grouped.items()]
 
 
-    @task
-    def identify_missing_write_aliases(instance, aliases, ilm_setting):
-        if not ilm_setting["success"]:
-            return ilm_setting
+    def retrieve_aliases(instance):
+        context = get_current_context()
+        ti = context["ti"]
+        aaa = ti.xcom_pull(task_ids="group_aliases_by_instance")
+        return [e for e in aaa if e["instance"] == instance]
 
-        num_months = ilm_setting["value"]["retention"]
+    @task
+    def identify_missing_write_aliases(input_data):
+        instance = input_data["instance"]
+        aliases = retrieve_aliases(instance)
+
+        num_months = input_data["value"]["retention"]
         regex = REGEX_MAPPING["write"]
 
         write_aliases= {alias['alias']: alias["index"] for alias in aliases if
@@ -201,10 +208,9 @@ def fnv():
 
 
     @task
-    def merge(results):
-        for r in results:
-            print(f"Collected: {r}")
-        return results
+    def collector2(results):
+        return [r for r in results if r["success"]]
+
 
 
     @task_group
@@ -221,8 +227,9 @@ def fnv():
     t_read_alias = assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
 
     grouped = group_aliases_by_instance(fetched_aliases)
-    collector(validate_lifecycle_settings.partial().expand_kwargs(grouped))
+    a = collector2(validate_lifecycle_settings.partial().expand_kwargs(grouped))
     collector(validate_mappings.partial().expand_kwargs(grouped))
+    identify_missing_write_aliases.partial().expand(a)
 
 fnv()
 
