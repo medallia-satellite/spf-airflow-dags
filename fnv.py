@@ -84,7 +84,7 @@ def fnv():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
-        return success(instance=alias, value=response.json())
+        return success(instance=alias, value=response.json().values())
 
     @task
     def fetch_alias_mappings(alias):
@@ -94,47 +94,48 @@ def fnv():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
-        return success(instance=alias, value=response.json())
+        return success(instance=alias, value=response.json().values())
 
     @task
-    def extract_mapping(mappings):
-        if not mappings["success"]:
-            return mappings
+    def extract_mapping(input_data):
+        if not input_data["success"]:
+            return input_data
 
-        _mappings = mappings["value"].values()
-        sample = next(iter(_mappings))
-        if not all(m == sample for m in _mappings):
-            return failure(instance=mappings["instance"], error=f"different mappings {_mappings}")
-        return success(instance=mappings["instance"], value=sample)
+        mappings = input_data["value"]
+        sample = next(iter(mappings))
+        if not all(m == sample for m in mappings):
+            return failure(instance=input_data["instance"], error=f"different mappings {mappings}")
+
+        return success(instance=input_data["instance"], value=sample)
 
     @task
-    def extract_ilm_setting(settings):
-
-        if not settings["success"]:
-            return settings
-        il_list = [s["settings"]["index"]["lifecycle"] for s in settings["value"].values()]
+    def extract_ilm_setting(input_data):
+        if not input_data["success"]:
+            return input_data
+        instance = input_data["instance"]
+        il_list = [s["settings"]["index"]["lifecycle"] for s in input_data["value"]]
 
         if any("name" not in il for il in il_list):
-            return failure(instance=settings["instance"], error=f"No lifecycle policy {il_list=}")
+            return failure(instance=instance, error=f"No lifecycle policy {il_list=}")
 
         policies = set(il["name"] for il in il_list)
         if not all(p in POLICY_MAPPING for p in policies):
-            return failure(instance=settings["instance"], error=f"Invalid policies: {policies=}")
+            return failure(instance=instance, error=f"Invalid policies: {policies=}")
 
         if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-            return failure(instance=settings["instance"], error=f"Retention period is not unique: {policies=}")
+            return failure(instance=instance, error=f"Retention period is not unique: {policies=}")
 
         if any("rollover_alias" not in il for il in il_list):
-            return failure(instance=settings["instance"], error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
+            return failure(instance=instance, error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
         if not all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
-            return failure(instance=settings["instance"], error=f"Invalid rollover alias {rollover_aliases=}")
+            return failure(instance=instance, error=f"Invalid rollover alias {rollover_aliases=}")
 
         if len(rollover_aliases) != 1:
-            return failure(instance=settings["instance"], error="Invalid rollover alias {rollover_aliases=}")
+            return failure(instance=instance, error="Invalid rollover alias {rollover_aliases=}")
 
-        return success(instance=settings["instance"], value={
+        return success(instance=instance, value={
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
             "rollover_alias": next(iter(rollover_aliases)),
         })
@@ -172,7 +173,6 @@ def fnv():
     def identify_missing_write_aliases(input_data):
         instance = input_data["instance"]
         aliases = retrieve_aliases(instance)
-        print(f"Found {aliases} aliases for {instance}")
 
         num_months = input_data["value"]["retention"]
         regex = REGEX_MAPPING["write"]
@@ -198,18 +198,22 @@ def fnv():
         return [r for r in results if r["success"] and r["value"]]
 
 
+    @task
+    def collector2(input_data):
+        return {r['instance']: r['error'] for r in input_data if not r["success"]}
+
 
 
     @task_group
     def validate_lifecycle_settings(instance):
         return extract_ilm_setting(
-            settings=fetch_alias_settings(alias=instance)
+            input_data=fetch_alias_settings(alias=instance)
         )
 
     @task_group
     def validate_mappings(instance):
         return extract_mapping(
-            mappings=fetch_alias_mappings(alias=instance)
+            input_data=fetch_alias_mappings(alias=instance)
         )
 
     fetched_aliases = fetch_aliases()
@@ -219,10 +223,13 @@ def fnv():
 
     instances = group_aliases_by_instance(fetched_aliases)
 
+    mappings = validate_mappings.expand(instance=instances)
+    a = collector.override(task_id="collect_validate_mappings")(mappings)
+    collector2(mappings)
 
-    a = collector.override(task_id="collect_validate_mappings")(validate_mappings.expand(instance=instances))
-
-    b = collector.override(task_id="collect_validate_lifecycle_settings")(validate_lifecycle_settings.expand(instance=a))
+    settings = validate_lifecycle_settings.expand(instance=a)
+    b = collector.override(task_id="collect_validate_lifecycle_settings")(settings)
+    collector2(settings)
 
     collector.override(task_id="collect_identify_missing_write_aliases")(identify_missing_write_aliases.expand(input_data=b))
 
