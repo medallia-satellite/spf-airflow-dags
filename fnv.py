@@ -224,8 +224,8 @@ def fnv():
 
     grouped = group_aliases_by_instance(fetched_aliases)
     a = collector(validate_lifecycle_settings.partial().expand_kwargs(grouped), task_id="collect_validate_lifecycle_settings")
-    collector(validate_mappings.partial().expand_kwargs(grouped), task_id="collect_validate_mappings")
-    collector(identify_missing_write_aliases.expand(input_data=a), task_id="collect_identify_missing_write_aliases")
+    collector(validate_mappings.partial().expand_kwargs(grouped)).override(task_id="collect_validate_mappings")
+    collector(identify_missing_write_aliases.expand(input_data=a)).override(task_id="collect_identify_missing_write_aliases")
 
 fnv()
 
