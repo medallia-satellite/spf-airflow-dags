@@ -157,7 +157,7 @@ def fnv():
         context = get_current_context()
         ti = context["ti"]
         ti.xcom_push("aliases", grouped)
-        return [success(instance=k) for k in grouped.keys()]
+        return [success(instance=k, value="") for k in grouped.keys()]
 
 
     def retrieve_aliases(instance):
@@ -209,13 +209,13 @@ def fnv():
     @task_group
     def validate_lifecycle_settings(instance):
         return extract_ilm_setting(
-            settings=fetch_alias_settings(alias=instance)
+            settings=fetch_alias_settings(alias=instance["instance"])
         )
 
     @task_group
     def validate_mappings(instance):
         return extract_mapping(
-            mappings=fetch_alias_mappings(alias=instance)
+            mappings=fetch_alias_mappings(alias=instance["instance"])
         )
 
     fetched_aliases = fetch_aliases()
