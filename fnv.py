@@ -219,10 +219,10 @@ def fnv():
         )
 
     @task_group
-    def validate_mappings(instance):
-        return extract_mapping(
-            input_data=fetch_alias_mappings(alias=instance)
-        )
+    def validate_mappings(input_data):
+        mappings = extract_mapping.expand(input_data=fetch_alias_mappings.expand(alias=input_data))
+        print_errors.override(task_id="print_mapping_errors")(mappings)
+        return filter_errors.override(task_id="filter_mapping_errors")(mappings)
 
     @task_group
     def add_missing_months(input_data):
@@ -238,11 +238,9 @@ def fnv():
 
     instances = group_aliases_by_instance(fetched_aliases)
 
-    m = validate_mappings.expand(instance=instances)
-    a = filter_errors.override(task_id="filter_mapping_errors")(m)
-    print_errors.override(task_id="print_mapping_errors")(m)
+    m = validate_mappings(input_data=instances)
 
-    s = validate_lifecycle_settings.expand(instance=a)
+    s = validate_lifecycle_settings.expand(instance=m)
     b = filter_errors.override(task_id="filter_lifecycle_settings_errors")(s)
     print_errors.override(task_id="print_lifecycle_setting_errors")(s)
 
