@@ -228,7 +228,7 @@ def fnv():
         return success(instance=instance, value=result)
 
     @task(task_id="push")
-    def push_ilm_settings(input_data):
+    def push(input_data):
         context = get_current_context()
         ti = context["ti"]
         for d in input_data:
@@ -237,10 +237,10 @@ def fnv():
 
         return [success(instance=d["instance"], value=None) for d in input_data if d["success"]]
 
-    def retrieve_ilm_setting(instance):
+    def retrieve(stage, instance):
         context = get_current_context()
         ti = context["ti"]
-        return ti.xcom_pull(task_ids="lifecycle_settings.push", key=instance)
+        return ti.xcom_pull(task_ids=f"{stage}.push", key=instance)
 
     @task
     def assert_all_indices_have_read_alias(all_indices, all_aliases):
@@ -262,20 +262,15 @@ def fnv():
         for k, v in grouped.items():
             ti.xcom_push(k, v)
 
-        return [success(instance=k, value="") for k, v in grouped.items()]
-
-    def retrieve_aliases(instance):
-        context = get_current_context()
-        ti = context["ti"]
-        return ti.xcom_pull(task_ids="aliases_by_instance", key=instance)
+        return [success(instance=k, value=v) for k, v in grouped.items()]
 
     @task
     def identify_missing_months(input_data):
         regex = REGEX_MAPPING["write"]
 
         instance = input_data["instance"]
-        aliases = retrieve_aliases(instance)
-        num_months = retrieve_ilm_setting(instance)["retention"]
+        aliases = retrieve("fetch_all_aliases", instance)
+        num_months = retrieve("lifecycle_settings", instance)["retention"]
 
         write_aliases = {alias['alias']: alias["index"] for alias in aliases if
                 regex.fullmatch(alias['alias']) and alias["is_write_index"]}
@@ -321,13 +316,20 @@ def fnv():
         return results
 
     @task_group
+    def fetch_all_aliases():
+        fetched_aliases = fetch_aliases()
+        fetched_indices = fetch_indices()
+        assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
+        return push(group_aliases_by_instance(fetched_aliases))
+
+    @task_group
     def lifecycle_settings(input_data):
         extracted = extract_ilm_setting.expand(
             input_data=fetch_alias_settings.expand(alias=input_data)
         )
         print_errors(extracted)
         filtered = filter_errors(extracted)
-        return push_ilm_settings(filtered)
+        return push(filtered)
 
 
     @task_group
@@ -346,14 +348,6 @@ def fnv():
         return filter_errors(processed)
 
 
-    fetched_aliases = fetch_aliases()
-    fetched_indices = fetch_indices()
-
-    assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
-
-    instances = group_aliases_by_instance(fetched_aliases)
-
-    s = lifecycle_settings(input_data=validate_mappings(input_data=instances))
-    prepare_missing_months(input_data=s)
+    prepare_missing_months(lifecycle_settings(input_data=validate_mappings(input_data=aliases())))
 
 fnv()
