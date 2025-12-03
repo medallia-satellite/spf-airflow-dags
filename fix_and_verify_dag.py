@@ -6,9 +6,8 @@ from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
 from dateutil.relativedelta import relativedelta
 
-from repo.fix_and_verify import BASE_REGEX, REGEX_MAPPING, POLICY_MAPPING, INDEX_SETTINGS_AND_MAPPINGS, monthly_aliases
-from repo.utils import success, failure, filter_errors, filter_empty, print_errors, push, retrieve
-
+from repo.fix_and_verify import *
+from repo.utils import *
 
 @dag(
     dag_display_name="FNV",
@@ -36,7 +35,7 @@ def fnv():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
-        return [r["index"] for r in response.json() if BASE_REGEX.search(r["index"])]
+        return [r["index"] for r in response.json() if INDEX_REGEX.match(r["index"])]
 
     @task(task_id="fetch")
     def fetch_alias_settings(alias):
