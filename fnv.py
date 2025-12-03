@@ -230,13 +230,12 @@ def fnv():
     @task(task_id="push_ilm_settings")
     def push_ilm_settings(input_data):
         context = get_current_context()
-
         ti = context["ti"]
         for d in input_data:
             if d["success"]:
                 ti.xcom_push(d["instance"], d["value"])
 
-        return input_data
+        return [success(instance=d["instance"], value=None) for d in input_data if d["success"]]
 
     def retrieve_ilm_setting(instance):
         context = get_current_context()
@@ -322,12 +321,13 @@ def fnv():
         return results
 
     @task_group
-    def validate_lifecycle_settings(input_data):
+    def lifecycle_settings(input_data):
         extracted = extract_ilm_setting.expand(
             input_data=fetch_alias_settings.expand(alias=input_data)
         )
         print_errors.override(task_id="print_lifecycle_setting_errors")(extracted)
-        return filter_errors.override(task_id="filter_lifecycle_settings_errors")(extracted)
+        filtered = filter_errors.override(task_id="filter_lifecycle_settings_errors")(extracted)
+        return push_ilm_settings(filtered)
 
 
     @task_group
@@ -353,7 +353,7 @@ def fnv():
 
     instances = group_aliases_by_instance(fetched_aliases)
 
-    s = push_ilm_settings(validate_lifecycle_settings(input_data=validate_mappings(input_data=instances)))
+    s = lifecycle_settings(input_data=validate_mappings(input_data=instances))
     prepare_missing_months(input_data=s)
 
 fnv()
