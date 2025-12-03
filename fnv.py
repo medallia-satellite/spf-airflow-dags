@@ -227,7 +227,7 @@ def fnv():
 
         return success(instance=instance, value=result)
 
-    @task(task_id="push_ilm_settings")
+    @task(task_id="push")
     def push_ilm_settings(input_data):
         context = get_current_context()
         ti = context["ti"]
@@ -240,7 +240,7 @@ def fnv():
     def retrieve_ilm_setting(instance):
         context = get_current_context()
         ti = context["ti"]
-        return ti.xcom_pull(task_ids="push_ilm_settings", key=instance)
+        return ti.xcom_pull(task_ids="lifecycle_settings.push", key=instance)
 
     @task
     def assert_all_indices_have_read_alias(all_indices, all_aliases):
