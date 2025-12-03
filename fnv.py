@@ -148,7 +148,7 @@ def fnv():
         hook_get.check_response(response)
         return [r["index"] for r in response.json() if BASE_REGEX.search(r["index"])]
 
-    @task
+    @task(task_id="fetch")
     def fetch_alias_settings(alias):
         alias = alias["instance"]
         response = hook_get.run(
@@ -160,7 +160,7 @@ def fnv():
         hook_get.check_response(response)
         return success(instance=alias, value=list(response.json().values()))
 
-    @task
+    @task(task_id="fetch")
     def fetch_alias_mappings(alias):
         alias = alias["instance"]
         response = hook_get.run(
@@ -180,7 +180,7 @@ def fnv():
         hook_get.check_response(response)
         return response.json()
 
-    @task
+    @task(task_id="extract")
     def extract_mapping(input_data):
         if not input_data["success"]:
             return input_data
@@ -192,7 +192,7 @@ def fnv():
 
         return success(instance=input_data["instance"], value=sample)
 
-    @task
+    @task(task_id="extract")
     def extract_ilm_setting(input_data):
         if not input_data["success"]:
             return input_data
