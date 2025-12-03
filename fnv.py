@@ -325,8 +325,8 @@ def fnv():
         extracted = extract_ilm_setting.expand(
             input_data=fetch_alias_settings.expand(alias=input_data)
         )
-        print_errors.override(task_id="print_lifecycle_setting_errors")(extracted)
-        filtered = filter_errors.override(task_id="filter_lifecycle_settings_errors")(extracted)
+        print_errors(extracted)
+        filtered = filter_errors(extracted)
         return push_ilm_settings(filtered)
 
 
@@ -335,15 +335,15 @@ def fnv():
         extracted = extract_mapping.expand(
             input_data=fetch_alias_mappings.expand(alias=input_data)
         )
-        print_errors.override(task_id="print_mapping_errors")(extracted)
-        return filter_errors.override(task_id="filter_mapping_errors")(extracted)
+        print_errors(extracted)
+        return filter_errors(extracted)
 
     @task_group
     def prepare_missing_months(input_data):
         missing_months = identify_missing_months.expand(input_data=input_data)
         filtered = filter_empty(missing_months)
         processed = aaaaaaaaa.expand(input_data=filtered)
-        return filter_errors.override(task_id="filter_errors_identify_missing_write_aliases")(processed)
+        return filter_errors(processed)
 
 
     fetched_aliases = fetch_aliases()
