@@ -227,8 +227,8 @@ def fnv():
     @task_group
     def add_missing_months(input_data):
         missing_months = identify_missing_write_aliases.expand(input_data=input_data)
-
-        return filter_empty(missing_months)
+        filtered = filter_empty(missing_months)
+        return aaaaaaaaa.expand(input_data=filtered)
 
 
     fetched_aliases = fetch_aliases()
