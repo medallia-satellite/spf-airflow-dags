@@ -214,9 +214,12 @@ def fnv():
 
     @task_group
     def validate_lifecycle_settings(instance):
-        return extract_ilm_setting(
+        extracted = extract_ilm_setting(
             input_data=fetch_alias_settings(alias=instance)
         )
+        print_errors.override(task_id="print_lifecycle_setting_errors")(extracted)
+        return filter_errors.override(task_id="filter_lifecycle_settings_errors")(extracted)
+
 
     @task_group
     def validate_mappings(input_data):
@@ -243,10 +246,8 @@ def fnv():
     m = validate_mappings(input_data=instances)
 
     s = validate_lifecycle_settings.expand(instance=m)
-    b = filter_errors.override(task_id="filter_lifecycle_settings_errors")(s)
-    print_errors.override(task_id="print_lifecycle_setting_errors")(s)
 
     filter_errors.override(task_id="filter_errors_identify_missing_write_aliases")(
-        add_missing_months(input_data=b))
+        add_missing_months(input_data=s))
 
 fnv()
