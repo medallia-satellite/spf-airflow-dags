@@ -4,11 +4,10 @@ from collections import defaultdict
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
-from airflow.operators.python import get_current_context
 from dateutil.relativedelta import relativedelta
 
-from fix_and_verify import BASE_REGEX, REGEX_MAPPING, POLICY_MAPPING, INDEX_SETTINGS_AND_MAPPINGS, monthly_aliases
-from utils import success, failure, filter_errors, filter_empty, print_errors, push, retrieve
+from .fix_and_verify import BASE_REGEX, REGEX_MAPPING, POLICY_MAPPING, INDEX_SETTINGS_AND_MAPPINGS, monthly_aliases
+from .utils import success, failure, filter_errors, filter_empty, print_errors, push, retrieve
 
 
 @dag(
