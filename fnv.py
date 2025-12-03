@@ -214,7 +214,7 @@ def fnv():
 
     @task_group
     def validate_lifecycle_settings(input_data):
-        extracted = extract_ilm_setting(
+        extracted = extract_ilm_setting.expand(
             input_data=fetch_alias_settings.expand(alias=input_data)
         )
         print_errors.override(task_id="print_lifecycle_setting_errors")(extracted)
