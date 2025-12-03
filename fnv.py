@@ -223,9 +223,9 @@ def fnv():
 
     @task_group
     def validate_mappings(input_data):
-        fetched = fetch_alias_mappings.expand(alias=input_data)
-        filtered = filter_errors.override(task_id="filter_fetching_errors")(fetched)
-        extracted = extract_mapping.expand(input_data=filtered)
+        extracted = extract_mapping.expand(
+            input_data=fetch_alias_mappings.expand(alias=input_data)
+        )
         print_errors.override(task_id="print_mapping_errors")(extracted)
         return filter_errors.override(task_id="filter_mapping_errors")(extracted)
 
