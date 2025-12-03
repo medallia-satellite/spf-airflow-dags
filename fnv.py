@@ -214,15 +214,15 @@ def fnv():
 
     @task_group
     def validate_lifecycle_settings(input_data):
-        settings = extract_ilm_setting.expand(
-            input_data=fetch_alias_settings.expand(alias=input_data)
-        )
+        fetched = fetch_alias_settings.expand(alias=input_data)
+        settings = extract_ilm_setting.expand(input_data=fetched)
         print_errors.override(task_id="print_lifecycle_setting_errors")(settings)
         return filter_errors.override(task_id="filter_lifecycle_settings_errors")(settings)
 
     @task_group
     def validate_mappings(input_data):
-        mappings = extract_mapping.expand(input_data=fetch_alias_mappings.expand(alias=input_data))
+        fetched = fetch_alias_mappings.expand(alias=input_data)
+        mappings = extract_mapping.expand(input_data=fetched)
         print_errors.override(task_id="print_mapping_errors")(mappings)
         return filter_errors.override(task_id="filter_mapping_errors")(mappings)
 
