@@ -190,6 +190,10 @@ def fnv():
         return success(instance=instance, value=missing_aliases)
 
     @task
+    def aaaaaaaaa(input_data):
+        return success(instance=input_data["instance"], value=input_data["value"])
+
+    @task
     def filter_errors(input_data):
         results = [d for d in input_data if d["success"]]
         print(f"Collected {len(results)} successes.")
@@ -198,7 +202,7 @@ def fnv():
     @task
     def filter_empty(input_data):
         results = [d for d in input_data if d["success"] and d["value"]]
-        print(f"Collected {len(results)} non-empty successes.")
+        print(f"Filtering {len(input_data) - len(results)} empty successes.")
         return results
 
     @task
@@ -222,7 +226,9 @@ def fnv():
 
     @task_group
     def add_missing_months(input_data):
-        return identify_missing_write_aliases(input_data)
+        missing_months = identify_missing_write_aliases.expand(input_data=input_data)
+        filtered = filter_empty(missing_months)
+        return aaaaaaaaa.expand(input_data=filtered)
 
 
     fetched_aliases = fetch_aliases()
@@ -241,6 +247,6 @@ def fnv():
     print_errors.override(task_id="print_lifecycle_setting_errors")(s)
 
     filter_errors.override(task_id="filter_errors_identify_missing_write_aliases")(
-        add_missing_months.expand(input_data=filter_empty(b)))
+        add_missing_months(input_data=b))
 
 fnv()
