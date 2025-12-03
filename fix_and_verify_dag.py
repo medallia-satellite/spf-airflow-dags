@@ -1,145 +1,15 @@
 import datetime
 import json
-import re
 from collections import defaultdict
-from typing import Iterator, Union, Any, TypedDict, Dict, Optional
 
 from airflow.decorators import task, dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
 from airflow.operators.python import get_current_context
 from dateutil.relativedelta import relativedelta
 
-BASE_PATTERN = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
-BASE_REGEX = re.compile(BASE_PATTERN)
-INDEX_PATTERN = rf"^seaas-{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
-INDEX_REGEX = re.compile(INDEX_PATTERN)
+from fix_and_verify import BASE_REGEX, REGEX_MAPPING, POLICY_MAPPING, INDEX_SETTINGS_AND_MAPPINGS, monthly_aliases
+from utils import success, failure, filter_errors, filter_empty, print_errors, push, retrieve
 
-REGEX_MAPPING = {
-    "read": re.compile(rf"^{BASE_PATTERN}$"),
-    "write": re.compile(rf"^{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
-    "rollover": re.compile(rf"^{BASE_PATTERN}-rollover$"),
-}
-
-POLICY_MAPPING = {
-	"M6": 6,
-	"M6_rollover": 6,
-	"M18": 18,
-	"M18_rollover": 18,
-	"M36": 36,
-	"M36_rollover": 36,
-}
-
-INDEX_SETTINGS_AND_MAPPINGS = {
-    "settings": {
-        "analysis": {
-            "filter": {
-                "compound_capture": {
-                    "type": "pattern_capture",
-                    "preserve_original": "false",
-                    "patterns": [
-                        "(!?[^@!@]+)@!@"
-                    ]
-                }
-            },
-            "analyzer": {
-                "topic-builder-analyzer": {
-                    "filter": [
-                        "compound_capture"
-                    ],
-                    "type": "custom",
-                    "tokenizer": "whitespace"
-                }
-            }
-        },
-        "number_of_shards": 1,
-        "number_of_replicas": 1
-    },
-    "mappings": {
-        "properties": {
-            "comments": {
-                "type": "nested",
-                "properties": {
-                    "language": {
-                        "type": "keyword"
-                    },
-                    "linguisticConnections": {
-                        "type": "text",
-                        "analyzer": "topic-builder-analyzer",
-                        "position_increment_gap": 1000
-                    },
-                    "linguisticConnectionsIndexes": {
-                        "type": "short"
-                    },
-                    "name": {
-                        "type": "keyword"
-                    },
-                    "persona": {
-                        "type": "keyword"
-                    },
-                    "sentenceContent": {
-                        "type": "text",
-                        "analyzer": "topic-builder-analyzer"
-                    },
-                    "sentenceIndex": {
-                        "type": "short"
-                    },
-                    "wordEndIndexes": {
-                        "type": "integer"
-                    },
-                    "wordStartIndexes": {
-                        "type": "integer"
-                    }
-                }
-            },
-            "responseDate": {
-                "type": "date"
-            },
-            "surveyId": {
-                "type": "long"
-            }
-        }
-    }
-}
-
-@task
-def filter_errors(input_data):
-    results = [d for d in input_data if d["success"]]
-    print(f"Collected {len(results)} successes.")
-    return results
-
-
-@task
-def filter_empty(input_data):
-    results = [d for d in input_data if d["success"] and d["value"]]
-    print(f"Filtering {len(input_data) - len(results)} empty successes.")
-    return results
-
-
-@task
-def print_errors(input_data):
-    results = {d['instance']: d['error'] for d in input_data if not d["success"]}
-    print(f"Errors found: {len(results)}")
-    print(json.dumps(results, indent=2))
-    return results
-
-class Result(TypedDict):
-    success: bool
-    instance: str
-    error: Optional[str]
-    value: Optional[Any]
-
-def success(instance: str, value: Any) -> Result:
-    return Result(success=True, instance=instance, error=None, value=value)
-
-def failure(instance: str, error: str) -> Result:
-    return Result(success=False, instance=instance, error=error, value=None)
-
-
-def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[str]:
-    current_date = start_date
-    for _ in range(num_months):
-        yield f"{alias}-{current_date:%Y-%m-%d}"
-        current_date -= relativedelta(months=1)
 
 @dag(
     dag_display_name="FNV",
@@ -248,21 +118,6 @@ def fnv():
 
         return success(instance=instance, value=result)
 
-    @task(task_id="push")
-    def push(input_data):
-        context = get_current_context()
-        ti = context["ti"]
-        for d in input_data:
-            if d["success"]:
-                ti.xcom_push(d["instance"], d["value"])
-
-        return [success(instance=d["instance"], value=None) for d in input_data if d["success"]]
-
-    def retrieve(stage, instance):
-        context = get_current_context()
-        ti = context["ti"]
-        return ti.xcom_pull(task_ids=f"{stage}.push", key=instance)
-
     @task
     def assert_all_indices_have_read_alias(all_indices, all_aliases):
         indices_with_read_alias = [r["index"] for r in all_aliases if REGEX_MAPPING["read"].match(r["alias"])]
@@ -277,12 +132,6 @@ def fnv():
             if not any(r.fullmatch(alias) for r in REGEX_MAPPING.values()):
                 continue
             grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
-
-        context = get_current_context()
-        ti = context["ti"]
-        for k, v in grouped.items():
-            ti.xcom_push(k, v)
-
         return [success(instance=k, value=v) for k, v in grouped.items()]
 
     @task
