@@ -348,6 +348,6 @@ def fnv():
         return filter_errors(processed)
 
 
-    prepare_missing_months(lifecycle_settings(input_data=validate_mappings(input_data=aliases())))
+    prepare_missing_months(lifecycle_settings(input_data=validate_mappings(input_data=fetch_all_aliases())))
 
 fnv()
