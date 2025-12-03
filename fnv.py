@@ -233,7 +233,8 @@ def fnv():
     def add_missing_months(input_data):
         missing_months = identify_missing_write_aliases.expand(input_data=input_data)
         filtered = filter_empty(missing_months)
-        return aaaaaaaaa.expand(input_data=filtered)
+        processed = aaaaaaaaa.expand(input_data=filtered)
+        return filter_errors.override(task_id="filter_errors_identify_missing_write_aliases")(processed)
 
 
     fetched_aliases = fetch_aliases()
@@ -247,7 +248,6 @@ def fnv():
 
     s = validate_lifecycle_settings(input_data=m)
 
-    filter_errors.override(task_id="filter_errors_identify_missing_write_aliases")(
-        add_missing_months(input_data=s))
+    add_missing_months(input_data=s)
 
 fnv()
