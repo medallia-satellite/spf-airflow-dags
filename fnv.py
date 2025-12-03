@@ -224,15 +224,24 @@ def fnv():
             "rollover_alias": next(iter(rollover_aliases)),
         }
 
-        context = get_current_context()
-        ti = context["ti"]
-        ti.xcom_push(instance, result)
+
         return success(instance=instance, value=result)
+
+    @task(task_id="push_ilm_settings")
+    def push_ilm_settings(input_data):
+        context = get_current_context()
+
+        ti = context["ti"]
+        for d in input_data:
+            if d["success"]:
+                ti.xcom_push(d["instance"], d["value"])
+
+        return input_data
 
     def retrieve_ilm_setting(instance):
         context = get_current_context()
         ti = context["ti"]
-        return ti.xcom_pull(task_ids="extract_ilm_setting", key=instance)
+        return ti.xcom_pull(task_ids="push_ilm_settings", key=instance)
 
     @task
     def assert_all_indices_have_read_alias(all_indices, all_aliases):
@@ -344,6 +353,7 @@ def fnv():
 
     instances = group_aliases_by_instance(fetched_aliases)
 
-    prepare_missing_months(input_data=validate_lifecycle_settings(input_data=validate_mappings(input_data=instances)))
+    s = push_ilm_settings(validate_lifecycle_settings(input_data=validate_mappings(input_data=instances)))
+    prepare_missing_months(input_data=s)
 
 fnv()
