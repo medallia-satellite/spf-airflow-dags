@@ -11,6 +11,8 @@ from dateutil.relativedelta import relativedelta
 
 BASE_PATTERN = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
 BASE_REGEX = re.compile(BASE_PATTERN)
+INDEX_PATTERN = rf"^seaas-{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
+INDEX_REGEX = re.compile(INDEX_PATTERN)
 
 REGEX_MAPPING = {
     "read": re.compile(rf"^{BASE_PATTERN}$"),
@@ -25,6 +27,78 @@ POLICY_MAPPING = {
 	"M18_rollover": 18,
 	"M36": 36,
 	"M36_rollover": 36,
+}
+
+INDEX_SETTINGS_AND_MAPPINGS = {
+    "settings": {
+        "analysis": {
+            "filter": {
+                "compound_capture": {
+                    "type": "pattern_capture",
+                    "preserve_original": "false",
+                    "patterns": [
+                        "(!?[^@!@]+)@!@"
+                    ]
+                }
+            },
+            "analyzer": {
+                "topic-builder-analyzer": {
+                    "filter": [
+                        "compound_capture"
+                    ],
+                    "type": "custom",
+                    "tokenizer": "whitespace"
+                }
+            }
+        },
+        "number_of_shards": 1,
+        "number_of_replicas": 1
+    },
+    "mappings": {
+        "properties": {
+            "comments": {
+                "type": "nested",
+                "properties": {
+                    "language": {
+                        "type": "keyword"
+                    },
+                    "linguisticConnections": {
+                        "type": "text",
+                        "analyzer": "topic-builder-analyzer",
+                        "position_increment_gap": 1000
+                    },
+                    "linguisticConnectionsIndexes": {
+                        "type": "short"
+                    },
+                    "name": {
+                        "type": "keyword"
+                    },
+                    "persona": {
+                        "type": "keyword"
+                    },
+                    "sentenceContent": {
+                        "type": "text",
+                        "analyzer": "topic-builder-analyzer"
+                    },
+                    "sentenceIndex": {
+                        "type": "short"
+                    },
+                    "wordEndIndexes": {
+                        "type": "integer"
+                    },
+                    "wordStartIndexes": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "responseDate": {
+                "type": "date"
+            },
+            "surveyId": {
+                "type": "long"
+            }
+        }
+    }
 }
 
 class Result(TypedDict):
@@ -54,6 +128,7 @@ def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> I
 )
 def fnv():
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
+    hook_put = HttpHook(method='PUT', http_conn_id='es-wordtags')
 
     @task
     def fetch_aliases():
@@ -96,6 +171,16 @@ def fnv():
         return success(instance=alias, value=list(response.json().values()))
 
     @task
+    def create_index(index_name):
+        response = hook_put.run(
+            endpoint=f'/{index_name}',
+            headers={'Accept': 'application/json'},
+            data=json.dumps(INDEX_SETTINGS_AND_MAPPINGS)
+        )
+        hook_get.check_response(response)
+        return response.json()
+
+    @task
     def extract_mapping(input_data):
         if not input_data["success"]:
             return input_data
@@ -134,18 +219,26 @@ def fnv():
         if len(rollover_aliases) != 1:
             return failure(instance=instance, error="Invalid rollover alias {rollover_aliases=}")
 
-        return success(instance=instance, value={
+        result = {
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
             "rollover_alias": next(iter(rollover_aliases)),
-        })
+        }
 
+        context = get_current_context()
+        ti = context["ti"]
+        ti.xcom_push(instance, result)
+        return success(instance=instance, value=result)
+
+    def retrieve_ilm_setting(instance):
+        context = get_current_context()
+        ti = context["ti"]
+        return ti.xcom_pull(task_ids="extract_ilm_setting", key=instance)
 
     @task
     def assert_all_indices_have_read_alias(all_indices, all_aliases):
         indices_with_read_alias = [r["index"] for r in all_aliases if REGEX_MAPPING["read"].match(r["alias"])]
         indices_without_read_alias = [index for index in all_indices if index not in indices_with_read_alias]
         assert len(indices_without_read_alias) == 0, f"Indices without read alias: {indices_without_read_alias=}"
-
 
     @task(task_id="aliases_by_instance")
     def group_aliases_by_instance(all_aliases: list):
@@ -169,14 +262,14 @@ def fnv():
         return ti.xcom_pull(task_ids="aliases_by_instance", key=instance)
 
     @task
-    def identify_missing_write_aliases(input_data):
-        instance = input_data["instance"]
-        aliases = retrieve_aliases(instance)
-
-        num_months = input_data["value"]["retention"]
+    def identify_missing_months(input_data):
         regex = REGEX_MAPPING["write"]
 
-        write_aliases= {alias['alias']: alias["index"] for alias in aliases if
+        instance = input_data["instance"]
+        aliases = retrieve_aliases(instance)
+        num_months = retrieve_ilm_setting(instance)["retention"]
+
+        write_aliases = {alias['alias']: alias["index"] for alias in aliases if
                 regex.fullmatch(alias['alias']) and alias["is_write_index"]}
 
         today = datetime.date.today()
@@ -191,7 +284,14 @@ def fnv():
 
     @task
     def aaaaaaaaa(input_data):
-        return success(instance=input_data["instance"], value=input_data["value"])
+        instance = "aa_topic-builder-aa.medallia.com-aa"
+        tenant_id = "101485"
+        date = "2024-06-01"
+        suffix = "000004"
+        result = {
+            "index_name": f"%3Cseaas-{instance}-%7B{date}%7Byyyy-MM-dd%7D%7D-{tenant_id}-{suffix}%3E"
+        }
+        return success(instance=input_data["instance"], value=result)
 
     @task
     def filter_errors(input_data):
@@ -231,7 +331,7 @@ def fnv():
 
     @task_group
     def prepare_missing_months(input_data):
-        missing_months = identify_missing_write_aliases.expand(input_data=input_data)
+        missing_months = identify_missing_months.expand(input_data=input_data)
         filtered = filter_empty(missing_months)
         processed = aaaaaaaaa.expand(input_data=filtered)
         return filter_errors.override(task_id="filter_errors_identify_missing_write_aliases")(processed)
