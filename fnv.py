@@ -101,6 +101,27 @@ INDEX_SETTINGS_AND_MAPPINGS = {
     }
 }
 
+@task
+def filter_errors(input_data):
+    results = [d for d in input_data if d["success"]]
+    print(f"Collected {len(results)} successes.")
+    return results
+
+
+@task
+def filter_empty(input_data):
+    results = [d for d in input_data if d["success"] and d["value"]]
+    print(f"Filtering {len(input_data) - len(results)} empty successes.")
+    return results
+
+
+@task
+def print_errors(input_data):
+    results = {d['instance']: d['error'] for d in input_data if not d["success"]}
+    print(f"Errors found: {len(results)}")
+    print(json.dumps(results, indent=2))
+    return results
+
 class Result(TypedDict):
     success: bool
     instance: str
@@ -296,24 +317,6 @@ def fnv():
         }
         return success(instance=input_data["instance"], value=result)
 
-    @task
-    def filter_errors(input_data):
-        results = [d for d in input_data if d["success"]]
-        print(f"Collected {len(results)} successes.")
-        return results
-
-    @task
-    def filter_empty(input_data):
-        results = [d for d in input_data if d["success"] and d["value"]]
-        print(f"Filtering {len(input_data) - len(results)} empty successes.")
-        return results
-
-    @task
-    def print_errors(input_data):
-        results = {d['instance']: d['error'] for d in input_data if not d["success"]}
-        print(f"Errors found: {len(results)}")
-        print(json.dumps(results, indent=2))
-        return results
 
     @task_group
     def fetch_all_aliases():
