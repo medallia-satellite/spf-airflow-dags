@@ -213,24 +213,22 @@ def fnv():
         return results
 
     @task_group
-    def validate_lifecycle_settings(input_data):
-        fetched = fetch_alias_settings.expand(alias=input_data)
-        settings = extract_ilm_setting.expand(input_data=fetched)
-        print_errors.override(task_id="print_lifecycle_setting_errors")(settings)
-        return filter_errors.override(task_id="filter_lifecycle_settings_errors")(settings)
+    def validate_lifecycle_settings(instance):
+        return extract_ilm_setting(
+            input_data=fetch_alias_settings(alias=instance)
+        )
 
     @task_group
-    def validate_mappings(input_data):
-        fetched = fetch_alias_mappings.expand(alias=input_data)
-        mappings = extract_mapping.expand(input_data=fetched)
-        print_errors.override(task_id="print_mapping_errors")(mappings)
-        return filter_errors.override(task_id="filter_mapping_errors")(mappings)
+    def validate_mappings(instance):
+        return extract_mapping(
+            input_data=fetch_alias_mappings(alias=instance)
+        )
 
     @task_group
     def add_missing_months(input_data):
         missing_months = identify_missing_write_aliases.expand(input_data=input_data)
-        filtered = filter_empty(missing_months)
-        return aaaaaaaaa.expand(input_data=filtered)
+
+        return filter_empty(missing_months)
 
 
     fetched_aliases = fetch_aliases()
@@ -240,11 +238,15 @@ def fnv():
 
     instances = group_aliases_by_instance(fetched_aliases)
 
-    m = validate_mappings(input_data=instances)
+    m = validate_mappings.expand(instance=instances)
+    a = filter_errors.override(task_id="filter_mapping_errors")(m)
+    print_errors.override(task_id="print_mapping_errors")(m)
 
-    s = validate_lifecycle_settings.expand(input_data=m)
+    s = validate_lifecycle_settings.expand(instance=a)
+    b = filter_errors.override(task_id="filter_lifecycle_settings_errors")(s)
+    print_errors.override(task_id="print_lifecycle_setting_errors")(s)
 
     filter_errors.override(task_id="filter_errors_identify_missing_write_aliases")(
-        add_missing_months(input_data=s))
+        add_missing_months(input_data=b))
 
 fnv()
