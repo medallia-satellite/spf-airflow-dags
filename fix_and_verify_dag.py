@@ -102,7 +102,7 @@ def fnv():
             return failure(instance=instance, error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
-        if not all(REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
+        if not all(ALIAS_REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
             return failure(instance=instance, error=f"Invalid rollover alias {rollover_aliases=}")
 
         if len(rollover_aliases) != 1:
@@ -118,7 +118,7 @@ def fnv():
 
     @task
     def assert_all_indices_have_read_alias(all_indices, all_aliases):
-        indices_with_read_alias = [r["index"] for r in all_aliases if REGEX_MAPPING["read"].match(r["alias"])]
+        indices_with_read_alias = [r["index"] for r in all_aliases if ALIAS_REGEX_MAPPING["read"].match(r["alias"])]
         indices_without_read_alias = [index for index in all_indices if index not in indices_with_read_alias]
         assert len(indices_without_read_alias) == 0, f"Indices without read alias: {indices_without_read_alias=}"
 
@@ -127,14 +127,14 @@ def fnv():
         grouped = defaultdict(list)
         for alias_entry in all_aliases:
             alias = alias_entry["alias"]
-            if not any(r.fullmatch(alias) for r in REGEX_MAPPING.values()):
+            if not any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
                 continue
             grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
         return [success(instance=k, value=v) for k, v in grouped.items()]
 
     @task
     def identify_missing_months(input_data):
-        regex = REGEX_MAPPING["write"]
+        regex = ALIAS_REGEX_MAPPING["write"]
 
         instance = input_data["instance"]
         aliases = retrieve("fetch_all_aliases", instance)
