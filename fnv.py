@@ -328,8 +328,7 @@ def fnv():
             input_data=fetch_alias_settings.expand(alias=input_data)
         )
         print_errors(extracted)
-        filtered = filter_errors(extracted)
-        return push(filtered)
+        return push(filter_errors(extracted))
 
 
     @task_group
@@ -338,14 +337,14 @@ def fnv():
             input_data=fetch_alias_mappings.expand(alias=input_data)
         )
         print_errors(extracted)
-        return filter_errors(extracted)
+        return push(filter_errors(extracted))
 
     @task_group
     def prepare_missing_months(input_data):
         missing_months = identify_missing_months.expand(input_data=input_data)
         filtered = filter_empty(missing_months)
         processed = aaaaaaaaa.expand(input_data=filtered)
-        return filter_errors(processed)
+        return push(filter_errors(processed))
 
 
     prepare_missing_months(lifecycle_settings(input_data=validate_mappings(input_data=fetch_all_aliases())))
