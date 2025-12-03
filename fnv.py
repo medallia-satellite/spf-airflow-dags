@@ -230,7 +230,7 @@ def fnv():
         return filter_errors.override(task_id="filter_mapping_errors")(extracted)
 
     @task_group
-    def add_missing_months(input_data):
+    def prepare_missing_months(input_data):
         missing_months = identify_missing_write_aliases.expand(input_data=input_data)
         filtered = filter_empty(missing_months)
         processed = aaaaaaaaa.expand(input_data=filtered)
@@ -244,10 +244,6 @@ def fnv():
 
     instances = group_aliases_by_instance(fetched_aliases)
 
-    m = validate_mappings(input_data=instances)
-
-    s = validate_lifecycle_settings(input_data=m)
-
-    add_missing_months(input_data=s)
+    prepare_missing_months(input_data=validate_lifecycle_settings(input_data=validate_mappings(input_data=instances)))
 
 fnv()
