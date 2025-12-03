@@ -1,9 +1,7 @@
 import datetime
 import json
 import re
-from collections import defaultdict, namedtuple
-from dataclasses import dataclass
-from pprint import pprint
+from collections import defaultdict
 from typing import Iterator, Union, Any, TypedDict, Dict, Optional
 
 from airflow.decorators import task, dag, task_group
@@ -149,7 +147,7 @@ def fnv():
         assert len(indices_without_read_alias) == 0, f"Indices without read alias: {indices_without_read_alias=}"
 
 
-    @task
+    @task(task_id="aliases_by_instance")
     def group_aliases_by_instance(all_aliases: list):
         grouped = defaultdict(list)
         for alias_entry in all_aliases:
@@ -160,15 +158,15 @@ def fnv():
 
         context = get_current_context()
         ti = context["ti"]
-        ti.xcom_push("aliases", grouped)
-        return [success(instance=k, value=v) for k, v in grouped.items()]
+        for k, v in grouped.items():
+            ti.xcom_push(k, v)
 
+        return [success(instance=k, value="") for k, v in grouped.items()]
 
     def retrieve_aliases(instance):
         context = get_current_context()
         ti = context["ti"]
-        aaa = ti.xcom_pull(task_ids="group_aliases_by_instance", key="aliases")
-        return aaa[instance]
+        return ti.xcom_pull(task_ids="aliases_by_instance", key=instance)
 
     @task
     def identify_missing_write_aliases(input_data):
@@ -192,8 +190,8 @@ def fnv():
         return success(instance=instance, value=missing_aliases)
 
     @task
-    def collector(input_data):
-        results = [d for d in input_data if d["success"] and d["value"]]
+    def filter_errors(input_data):
+        results = [d for d in input_data if d["success"]]
         print(f"Collected {len(results)} successes.")
         return results
 
@@ -220,18 +218,18 @@ def fnv():
     fetched_aliases = fetch_aliases()
     fetched_indices = fetch_indices()
 
-    t_read_alias = assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
+    assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
 
     instances = group_aliases_by_instance(fetched_aliases)
 
     m = validate_mappings.expand(instance=instances)
-    a = collector.override(task_id="collect_validate_mappings")(m)
+    a = filter_errors.override(task_id="filter_mapping_errors")(m)
     print_errors.override(task_id="print_mapping_errors")(m)
 
     s = validate_lifecycle_settings.expand(instance=a)
-    b = collector.override(task_id="collect_validate_lifecycle_settings")(s)
+    b = filter_errors.override(task_id="filter_lifecycle_settings_errors")(s)
     print_errors.override(task_id="print_lifecycle_setting_errors")(s)
 
-    collector.override(task_id="collect_identify_missing_write_aliases")(identify_missing_write_aliases.expand(input_data=b))
+    filter_errors.override(task_id="filter_errors_identify_missing_write_aliases")(identify_missing_write_aliases.expand(input_data=b))
 
 fnv()
