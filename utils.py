@@ -58,7 +58,7 @@ def filter_empty(data):
 
 @task
 def print_errors(data):
-    results = {d['instance']: d['error'] for d in data if not d["success"]}
+    results = {d['key']: d['error'] for d in data if not d["success"]}
     print(f"Errors found: {len(results)}")
     print(json.dumps(results, indent=2))
     return results
