@@ -252,7 +252,7 @@ def fnv():
 
     @task_group
     def lifecycle_settings(data):
-        f = fetch_alias_settings.expand(hook=hook_get, data=data)
+        f = fetch_alias_settings.partial(hook=hook_get).expand(data=data)
         e = extract_ilm_setting.expand(data=f)
         print_errors(e)
         return push(filter_errors(e))
