@@ -64,7 +64,6 @@ def create_index(hook, index_name):
 
 
 @task
-@chain_on_success
 def add_aliases(hook, data):
     index = data["key"]
     aliases = generate_aliases(index)
