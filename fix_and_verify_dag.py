@@ -70,19 +70,19 @@ def fnv():
 
     @task(task_id="extract")
     @chain_on_success
-    def extract_mapping(input_data):
-        _mappings = input_data["value"]
+    def extract_mapping(data):
+        _mappings = data["value"]
         sample = next(iter(_mappings))
         if not all(m == sample for m in _mappings):
-            return failure(instance=input_data["instance"], error=f"different mappings {_mappings}")
+            return failure(instance=data["instance"], error=f"different mappings {_mappings}")
 
-        return success(instance=input_data["instance"], value=sample)
+        return success(instance=data["instance"], value=sample)
 
     @task(task_id="extract")
     @chain_on_success
-    def extract_ilm_setting(input_data):
-        instance = input_data["instance"]
-        il_list = [s["settings"]["index"]["lifecycle"] for s in input_data["value"]]
+    def extract_ilm_setting(data):
+        instance = data["instance"]
+        il_list = [s["settings"]["index"]["lifecycle"] for s in data["value"]]
 
         if any("name" not in il for il in il_list):
             return failure(instance=instance, error=f"No lifecycle policy {il_list=}")
@@ -130,10 +130,10 @@ def fnv():
         return [success(instance=k, value=v) for k, v in grouped.items()]
 
     @chain_on_success
-    def extract_instance_details(input_data):
-        instance = input_data["instance"]
+    def extract_instance_details(data):
+        instance = data["instance"]
 
-        indices = [a["index"] for a in input_data["value"]]
+        indices = [a["index"] for a in data["value"]]
         if not any(INDEX_REGEX.fullmatch(i) for i in indices):
             return failure(instance=instance, error=f"Invalid indices {indices=}")
 
@@ -149,10 +149,10 @@ def fnv():
         return success(instance=instance, value="")
 
     @task
-    def identify_missing_months(input_data):
+    def identify_missing_months(data):
         regex = ALIAS_REGEX_MAPPING["write"]
 
-        instance = input_data["instance"]
+        instance = data["instance"]
         aliases = retrieve("reconcile_aliases", instance)
         num_months = retrieve("lifecycle_settings", instance)["retention"]
 
@@ -170,7 +170,7 @@ def fnv():
         return success(instance=instance, value=missing_aliases)
 
     @task
-    def aaaaaaaaa(input_data):
+    def aaaaaaaaa(data):
         instance = "aa_topic-builder-aa.medallia.com-aa"
         tenant_id = "101485"
         date = "2024-06-01"
@@ -178,7 +178,7 @@ def fnv():
         result = {
             "index_name": f"%3Cseaas-{instance}-%7B{date}%7Byyyy-MM-dd%7D%7D-{tenant_id}-{suffix}%3E"
         }
-        return success(instance=input_data["instance"], value=result)
+        return success(instance=data["instance"], value=result)
 
     @task
     def alias_per_index(aliases):
@@ -214,26 +214,26 @@ def fnv():
 
     @task_group
     def lifecycle_settings(input_data):
-        f = fetch_alias_settings.expand(input_data=input_data)
-        e = extract_ilm_setting.expand(input_data=f)
+        f = fetch_alias_settings.expand(data=input_data)
+        e = extract_ilm_setting.expand(data=f)
         print_errors(e)
         return push(filter_errors(e))
 
     @task_group
     def mappings(input_data):
-        f = fetch_alias_mappings.expand(input_data=input_data)
-        e = extract_mapping.expand(input_data=f)
+        f = fetch_alias_mappings.expand(data=input_data)
+        e = extract_mapping.expand(data=f)
         print_errors(e)
         return push(filter_errors(e))
 
     @task_group
     def prepare_missing_months(input_data):
-        missing_months = identify_missing_months.expand(input_data=input_data)
+        missing_months = identify_missing_months.expand(data=input_data)
         filtered = filter_empty(missing_months)
-        processed = aaaaaaaaa.expand(input_data=filtered)
+        processed = aaaaaaaaa.expand(data=filtered)
         return push(filter_errors(processed))
 
     missing_aliases()
-    prepare_missing_months(lifecycle_settings(input_data=mappings(input_data=reconcile_aliases())))
+    prepare_missing_months(lifecycle_settings(data=mappings(data=reconcile_aliases())))
 
 fnv()
