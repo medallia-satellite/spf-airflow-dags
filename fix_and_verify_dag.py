@@ -241,13 +241,13 @@ def fnv():
 
     @task_group
     def missing_aliases():
-        fetched_aliases = fetch_aliases(hook_get)
-        fetched_indices = fetch_indices(hook_get)
-        return push(add_aliases.expand(hook=hook_post, data=indices_with_missing_aliases(fetched_indices, alias_per_index(fetched_aliases))))
+        fetched_aliases = fetch_aliases(hook=hook_get)
+        fetched_indices = fetch_indices(hook=hook_get)
+        return push(add_aliases.partial(hook=hook_post).expand(data=indices_with_missing_aliases(fetched_indices, alias_per_index(fetched_aliases))))
 
     @task_group
     def reconcile_aliases():
-        fetched_aliases = fetch_aliases(hook_get)
+        fetched_aliases = fetch_aliases(hook=hook_get)
         return push(group_aliases_by_instance(fetched_aliases))
 
     @task_group
@@ -259,7 +259,7 @@ def fnv():
 
     @task_group
     def mappings(data):
-        f = fetch_alias_mappings.expand(hook=hook_get, data=data)
+        f = fetch_alias_mappings.partial(hook=hook_get).expand(data=data)
         e = extract_mapping.expand(data=f)
         print_errors(e)
         return push(filter_errors(e))
