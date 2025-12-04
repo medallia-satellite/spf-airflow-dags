@@ -9,14 +9,24 @@ BASE_REGEX = re.compile(BASE_PATTERN)
 INDEX_PATTERN = rf"^seaas-{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
 INDEX_REGEX = re.compile(INDEX_PATTERN)
 
+def generate_aliases(index):
+    read_alias = ALIAS_REGEX_MAPPING["read"].search(index).group(0)
+    write_alias = ALIAS_REGEX_MAPPING["write"].search(index).group(0)
+    rollover_alias = f"{read_alias}-rollover"
+    return {
+        "read": read_alias,
+        "write": write_alias,
+        "rollover": rollover_alias,
+    }
+
 def tenant_id_from_index(index_name):
     m = INDEX_REGEX.fullmatch(index_name).groupdict()
     return m["tenant_id"]
 
 ALIAS_REGEX_MAPPING = {
-    "read": re.compile(rf"^{BASE_PATTERN}$"),
-    "write": re.compile(rf"^{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
-    "rollover": re.compile(rf"^{BASE_PATTERN}-rollover$"),
+    "read": re.compile(rf"{BASE_PATTERN}"),
+    "write": re.compile(rf"{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}"),
+    "rollover": re.compile(rf"{BASE_PATTERN}-rollover"),
 }
 POLICY_MAPPING = {
 	"M6": 6,

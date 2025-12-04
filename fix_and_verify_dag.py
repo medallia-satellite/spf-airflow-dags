@@ -185,22 +185,29 @@ def fnv():
         return result
 
     @task
-    def eeeeeee(indices, aliases):
+    def indices_with_missing_aliases(indices, aliases):
         result = []
         for index in indices:
             if index not in aliases:
-                result.append(failure(key=index, error=f"no alias {index=}"))
+                print(f"{index} - no alias")
+                result.append(success(key=index, value=None))
             elif len(aliases[index]) < 3:
-                result.append(failure(key=index, error=f"alias missing{aliases[index]}"))
-            else:
-                result.append(success(key=index, value=aliases[index]))
+                print(f"{index} - {aliases[index]}")
+                result.append(success(key=index, value=None))
         return result
 
     @task_group
     def missing_aliases():
         fetched_aliases = fetch_aliases()
         fetched_indices = fetch_indices()
-        return push(filter_success(eeeeeee(fetched_indices, alias_per_index(fetched_aliases))))
+        return push(add_missing_aliases.expand(data=indices_with_missing_aliases(fetched_indices, alias_per_index(fetched_aliases))))
+
+    @task
+    def add_missing_aliases(data):
+        index = data["key"]
+        aliases = generate_aliases(index)
+        return success(key=index, value=aliases)
+
 
     @task_group
     def reconcile_aliases():

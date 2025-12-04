@@ -45,12 +45,6 @@ def filter_errors(data):
     return results
 
 @task
-def filter_success(data):
-    results = [success(key=d["key"], value=d["error"]) for d in data if not d["success"]]
-    print(f"Filtering {len(data) - len(results)} successes.")
-    return results
-
-@task
 def filter_empty(data):
     results = [d for d in data if d["success"] and d["value"]]
     print(f"Filtering {len(data) - len(results)} empty successes.")
