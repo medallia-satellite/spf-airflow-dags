@@ -38,7 +38,7 @@ def fnv():
 
     @task(task_id="fetch")
     def fetch_alias_settings(data):
-        alias = data["instance"]
+        alias = data["key"]
         response = hook_get.run(
             endpoint=f'/{alias}/_settings/'
                      f'index.lifecycle.name,'
@@ -50,7 +50,7 @@ def fnv():
 
     @task(task_id="fetch")
     def fetch_alias_mappings(data):
-        alias = data["instance"]
+        alias = data["key"]
         response = hook_get.run(
             endpoint=f'/{alias}/_mapping',
             headers={'Accept': 'application/json'},
@@ -74,14 +74,14 @@ def fnv():
         _mappings = data["value"]
         sample = next(iter(_mappings))
         if not all(m == sample for m in _mappings):
-            return failure(key=data["instance"], error=f"different mappings {_mappings}")
+            return failure(key=data["key"], error=f"different mappings {_mappings}")
 
-        return success(key=data["instance"], value=sample)
+        return success(key=data["key"], value=sample)
 
     @task(task_id="extract")
     @chain_on_success
     def extract_ilm_setting(data):
-        instance = data["instance"]
+        instance = data["key"]
         il_list = [s["settings"]["index"]["lifecycle"] for s in data["value"]]
 
         if any("name" not in il for il in il_list):
@@ -125,7 +125,7 @@ def fnv():
 
     @chain_on_success
     def extract_instance_details(data):
-        instance = data["instance"]
+        instance = data["key"]
 
         indices = [a["index"] for a in data["value"]]
         if not any(INDEX_REGEX.fullmatch(i) for i in indices):
@@ -146,7 +146,7 @@ def fnv():
     def identify_missing_months(data):
         regex = ALIAS_REGEX_MAPPING["write"]
 
-        instance = data["instance"]
+        instance = data["key"]
         aliases = retrieve("reconcile_aliases", instance)
         num_months = retrieve("lifecycle_settings", instance)["retention"]
 
@@ -172,7 +172,7 @@ def fnv():
         result = {
             "index_name": f"%3Cseaas-{instance}-%7B{date}%7Byyyy-MM-dd%7D%7D-{tenant_id}-{suffix}%3E"
         }
-        return success(key=data["instance"], value=result)
+        return success(key=data["key"], value=result)
 
     @task
     def alias_per_index(aliases):
