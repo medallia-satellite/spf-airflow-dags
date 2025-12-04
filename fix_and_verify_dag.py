@@ -200,7 +200,7 @@ def fnv():
                 result.append(failure(instance=index, error=f"alias missing{aliases[index]}"))
             else:
                 result.append(success(instance=index, value=aliases[index]))
-        return
+        return result
 
     @task_group
     def missing_aliases():
