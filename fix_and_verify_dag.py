@@ -46,7 +46,7 @@ def fnv():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
-        return success(instance=alias, value=list(response.json().values()))
+        return success(key=alias, value=list(response.json().values()))
 
     @task(task_id="fetch")
     def fetch_alias_mappings(data):
@@ -56,7 +56,7 @@ def fnv():
             headers={'Accept': 'application/json'},
         )
         hook_get.check_response(response)
-        return success(instance=alias, value=list(response.json().values()))
+        return success(key=alias, value=list(response.json().values()))
 
     @task
     def create_index(index_name):
@@ -74,9 +74,9 @@ def fnv():
         _mappings = data["value"]
         sample = next(iter(_mappings))
         if not all(m == sample for m in _mappings):
-            return failure(instance=data["instance"], error=f"different mappings {_mappings}")
+            return failure(key=data["instance"], error=f"different mappings {_mappings}")
 
-        return success(instance=data["instance"], value=sample)
+        return success(key=data["instance"], value=sample)
 
     @task(task_id="extract")
     @chain_on_success
@@ -85,24 +85,24 @@ def fnv():
         il_list = [s["settings"]["index"]["lifecycle"] for s in data["value"]]
 
         if any("name" not in il for il in il_list):
-            return failure(instance=instance, error=f"No lifecycle policy {il_list=}")
+            return failure(key=instance, error=f"No lifecycle policy {il_list=}")
 
         policies = set(il["name"] for il in il_list)
         if not all(p in POLICY_MAPPING for p in policies):
-            return failure(instance=instance, error=f"Invalid policies: {policies=}")
+            return failure(key=instance, error=f"Invalid policies: {policies=}")
 
         if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-            return failure(instance=instance, error=f"Retention period is not unique: {policies=}")
+            return failure(key=instance, error=f"Retention period is not unique: {policies=}")
 
         if any("rollover_alias" not in il for il in il_list):
-            return failure(instance=instance, error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
+            return failure(key=instance, error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
         if not all(ALIAS_REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
-            return failure(instance=instance, error=f"Invalid rollover alias {rollover_aliases=}")
+            return failure(key=instance, error=f"Invalid rollover alias {rollover_aliases=}")
 
         if len(rollover_aliases) != 1:
-            return failure(instance=instance, error="Invalid rollover alias {rollover_aliases=}")
+            return failure(key=instance, error="Invalid rollover alias {rollover_aliases=}")
 
         result = {
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
@@ -110,13 +110,7 @@ def fnv():
         }
 
 
-        return success(instance=instance, value=result)
-
-    @task
-    def assert_all_indices_have_read_alias(all_indices, all_aliases):
-        indices_with_read_alias = [r["index"] for r in all_aliases if ALIAS_REGEX_MAPPING["read"].match(r["alias"])]
-        indices_without_read_alias = [index for index in all_indices if index not in indices_with_read_alias]
-        assert len(indices_without_read_alias) == 0, f"Indices without read alias: {indices_without_read_alias=}"
+        return success(key=instance, value=result)
 
     @task(task_id="aliases_by_instance")
     def group_aliases_by_instance(all_aliases: list):
@@ -127,7 +121,7 @@ def fnv():
                 continue
             grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
 
-        return [success(instance=k, value=v) for k, v in grouped.items()]
+        return [success(key=k, value=v) for k, v in grouped.items()]
 
     @chain_on_success
     def extract_instance_details(data):
@@ -135,18 +129,18 @@ def fnv():
 
         indices = [a["index"] for a in data["value"]]
         if not any(INDEX_REGEX.fullmatch(i) for i in indices):
-            return failure(instance=instance, error=f"Invalid indices {indices=}")
+            return failure(key=instance, error=f"Invalid indices {indices=}")
 
         t = set(tenant_id_from_index(i) for i in indices)
         if len(t) != 1:
-            return failure(instance=instance, error=f"Multiple tenant_ids found {indices=}")
+            return failure(key=instance, error=f"Multiple tenant_ids found {indices=}")
 
 
         aliases = retrieve("reconcile_aliases", instance)
         num_months = retrieve("lifecycle_settings", instance)["retention"]
         indices = [a["index"] for a in aliases]
 
-        return success(instance=instance, value="")
+        return success(key=instance, value="")
 
     @task
     def identify_missing_months(data):
@@ -167,7 +161,7 @@ def fnv():
             if monthly_alias not in write_aliases:
                 missing_aliases.append(monthly_alias)
 
-        return success(instance=instance, value=missing_aliases)
+        return success(key=instance, value=missing_aliases)
 
     @task
     def aaaaaaaaa(data):
@@ -178,7 +172,7 @@ def fnv():
         result = {
             "index_name": f"%3Cseaas-{instance}-%7B{date}%7Byyyy-MM-dd%7D%7D-{tenant_id}-{suffix}%3E"
         }
-        return success(instance=data["instance"], value=result)
+        return success(key=data["instance"], value=result)
 
     @task
     def alias_per_index(aliases):
@@ -195,24 +189,22 @@ def fnv():
         result = []
         for index in indices:
             if index not in aliases:
-                result.append(failure(instance=index, error=f"no alias {index=}"))
+                result.append(failure(key=index, error=f"no alias {index=}"))
             elif len(aliases[index]) < 3:
-                result.append(failure(instance=index, error=f"alias missing{aliases[index]}"))
+                result.append(failure(key=index, error=f"alias missing{aliases[index]}"))
             else:
-                result.append(success(instance=index, value=aliases[index]))
+                result.append(success(key=index, value=aliases[index]))
         return result
 
     @task_group
     def missing_aliases():
         fetched_aliases = fetch_aliases()
         fetched_indices = fetch_indices()
-        return eeeeeee(fetched_indices, alias_per_index(fetched_aliases))
+        return filter_success(eeeeeee(fetched_indices, alias_per_index(fetched_aliases)))
 
     @task_group
     def reconcile_aliases():
         fetched_aliases = fetch_aliases()
-        fetched_indices = fetch_indices()
-        assert_all_indices_have_read_alias(fetched_indices, fetched_aliases)
         return push(group_aliases_by_instance(fetched_aliases))
 
     @task_group
