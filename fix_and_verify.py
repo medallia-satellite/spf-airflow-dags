@@ -8,6 +8,11 @@ BASE_PATTERN = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,
 BASE_REGEX = re.compile(BASE_PATTERN)
 INDEX_PATTERN = rf"^seaas-{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
 INDEX_REGEX = re.compile(INDEX_PATTERN)
+
+def tenant_id_from_index(index_name):
+    m = INDEX_REGEX.fullmatch(index_name).groupdict()
+    return m["tenant_id"]
+
 ALIAS_REGEX_MAPPING = {
     "read": re.compile(rf"^{BASE_PATTERN}$"),
     "write": re.compile(rf"^{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}$"),

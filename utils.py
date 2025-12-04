@@ -1,3 +1,4 @@
+import functools
 import json
 from typing import TypedDict, Optional, Any
 
@@ -19,6 +20,25 @@ def success(instance: str, value: Any) -> Result:
 def failure(instance: str, error: str) -> Result:
     return Result(success=False, instance=instance, error=error, value=None)
 
+def chain_on_success(func):
+    """
+    Decorator for functional pipelines.
+
+    It checks the 'success' key in the single positional argument (data dict).
+    If 'data["success"]' is False, it immediately returns the data dictionary,
+    short-circuiting the execution chain.
+    """
+
+    @functools.wraps(func)
+    def wrapper(data):
+        # Check for the failure condition at the beginning of the function
+        if not data["success"]:
+            return data
+
+        # If success is True, execute the decorated function
+        return func(data)
+
+    return wrapper
 
 @task
 def filter_errors(input_data):
