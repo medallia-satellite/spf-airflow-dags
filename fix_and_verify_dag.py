@@ -37,8 +37,8 @@ def fnv():
         return [r["index"] for r in response.json() if INDEX_REGEX.match(r["index"])]
 
     @task(task_id="fetch")
-    def fetch_alias_settings(input_data):
-        alias = input_data["instance"]
+    def fetch_alias_settings(data):
+        alias = data["instance"]
         response = hook_get.run(
             endpoint=f'/{alias}/_settings/'
                      f'index.lifecycle.name,'
@@ -49,8 +49,8 @@ def fnv():
         return success(instance=alias, value=list(response.json().values()))
 
     @task(task_id="fetch")
-    def fetch_alias_mappings(input_data):
-        alias = input_data["instance"]
+    def fetch_alias_mappings(data):
+        alias = data["instance"]
         response = hook_get.run(
             endpoint=f'/{alias}/_mapping',
             headers={'Accept': 'application/json'},
@@ -213,22 +213,22 @@ def fnv():
         return push(group_aliases_by_instance(fetched_aliases))
 
     @task_group
-    def lifecycle_settings(input_data):
-        f = fetch_alias_settings.expand(data=input_data)
+    def lifecycle_settings(data):
+        f = fetch_alias_settings.expand(data=data)
         e = extract_ilm_setting.expand(data=f)
         print_errors(e)
         return push(filter_errors(e))
 
     @task_group
-    def mappings(input_data):
-        f = fetch_alias_mappings.expand(data=input_data)
+    def mappings(data):
+        f = fetch_alias_mappings.expand(data=data)
         e = extract_mapping.expand(data=f)
         print_errors(e)
         return push(filter_errors(e))
 
     @task_group
-    def prepare_missing_months(input_data):
-        missing_months = identify_missing_months.expand(data=input_data)
+    def prepare_missing_months(data):
+        missing_months = identify_missing_months.expand(data=data)
         filtered = filter_empty(missing_months)
         processed = aaaaaaaaa.expand(data=filtered)
         return push(filter_errors(processed))
