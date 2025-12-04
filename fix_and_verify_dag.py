@@ -192,11 +192,14 @@ def fnv():
 
     @task
     def eeeeeee(indices, aliases):
+        result = []
         for index in indices:
             if index not in aliases:
-                continue
-            if len(aliases[index]) < 3:
-                continue
+                result.append(failure(instance=index, error=f"no alias {index=}"))
+            elif len(aliases[index]) < 3:
+                result.append(failure(instance=index, error=f"alias missing{aliases[index]}"))
+            else:
+                result.append(success(instance=index, value=aliases[index]))
         return
 
     @task_group
