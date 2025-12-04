@@ -200,7 +200,7 @@ def fnv():
     def missing_aliases():
         fetched_aliases = fetch_aliases()
         fetched_indices = fetch_indices()
-        return filter_success(eeeeeee(fetched_indices, alias_per_index(fetched_aliases)))
+        return push(filter_success(eeeeeee(fetched_indices, alias_per_index(fetched_aliases))))
 
     @task_group
     def reconcile_aliases():
