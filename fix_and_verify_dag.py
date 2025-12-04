@@ -8,6 +8,98 @@ from airflow.providers.http.hooks.http import HttpHook
 from repo.fix_and_verify import *
 from repo.utils import *
 
+@task
+def fetch_aliases(hook):
+    response = hook.run(
+        endpoint='/_cat/aliases?h=alias,index,is_write_index',
+        headers={'Accept': 'application/json'},
+    )
+    hook.check_response(response)
+    return [r for r in response.json() if BASE_REGEX.match(r["alias"])]
+
+
+@task
+def fetch_indices(hook):
+    response = hook.run(
+        endpoint='/_cat/indices?h=index&format=json',
+        headers={'Accept': 'application/json'},
+    )
+    hook.check_response(response)
+    return [r["index"] for r in response.json() if INDEX_REGEX.match(r["index"])]
+
+
+@task(task_id="fetch")
+def fetch_alias_settings(hook, data):
+    alias = data["key"]
+    response = hook.run(
+        endpoint=f'/{alias}/_settings/'
+                 f'index.lifecycle.name,'
+                 f'index.lifecycle.rollover_alias',
+        headers={'Accept': 'application/json'},
+    )
+    hook.check_response(response)
+    return success(key=alias, value=list(response.json().values()))
+
+
+@task(task_id="fetch")
+def fetch_alias_mappings(hook, data):
+    alias = data["key"]
+    response = hook.run(
+        endpoint=f'/{alias}/_mapping',
+        headers={'Accept': 'application/json'},
+    )
+    hook.check_response(response)
+    return success(key=alias, value=list(response.json().values()))
+
+
+@task
+def create_index(hook, index_name):
+    response = hook.run(
+        endpoint=f'/{index_name}',
+        headers={'Accept': 'application/json'},
+        data=json.dumps(INDEX_SETTINGS_AND_MAPPINGS)
+    )
+    hook.check_response(response)
+    return response.json()
+
+
+@task
+@chain_on_success
+def add_aliases(hook, data):
+    index = data["key"]
+    aliases = generate_aliases(index)
+    actions = [
+        {
+            "add": {
+                "index": index,
+                "alias": aliases["read"],
+                "is_write_index": False,
+            }
+        },
+        {
+            "add": {
+                "index": index,
+                "alias": aliases["write"],
+                "is_write_index": True,
+            }
+        },
+        {
+            "add": {
+                "index": index,
+                "alias": aliases["rollover"],
+                "is_write_index": False,
+            }
+        },
+
+    ]
+    response = hook.run(
+        endpoint=f'/_aliases',
+        headers={'Accept': 'application/json'},
+        data=json.dumps({"actions": actions})
+    )
+    hook.check_response(response)
+    return success(key=data["key"], value=response.json())
+
 @dag(
     dag_display_name="FNV",
     tags=["spf", "test", "poc"],
@@ -17,56 +109,8 @@ from repo.utils import *
 def fnv():
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     hook_put = HttpHook(method='PUT', http_conn_id='es-wordtags')
+    hook_post = HttpHook(method='POST', http_conn_id='es-wordtags')
 
-    @task
-    def fetch_aliases():
-        response = hook_get.run(
-            endpoint='/_cat/aliases?h=alias,index,is_write_index',
-            headers={'Accept': 'application/json'},
-        )
-        hook_get.check_response(response)
-        return [r for r in response.json() if BASE_REGEX.match(r["alias"])]
-
-    @task
-    def fetch_indices():
-        response = hook_get.run(
-            endpoint='/_cat/indices?h=index&format=json',
-            headers={'Accept': 'application/json'},
-        )
-        hook_get.check_response(response)
-        return [r["index"] for r in response.json() if INDEX_REGEX.match(r["index"])]
-
-    @task(task_id="fetch")
-    def fetch_alias_settings(data):
-        alias = data["key"]
-        response = hook_get.run(
-            endpoint=f'/{alias}/_settings/'
-                     f'index.lifecycle.name,'
-                     f'index.lifecycle.rollover_alias',
-            headers={'Accept': 'application/json'},
-        )
-        hook_get.check_response(response)
-        return success(key=alias, value=list(response.json().values()))
-
-    @task(task_id="fetch")
-    def fetch_alias_mappings(data):
-        alias = data["key"]
-        response = hook_get.run(
-            endpoint=f'/{alias}/_mapping',
-            headers={'Accept': 'application/json'},
-        )
-        hook_get.check_response(response)
-        return success(key=alias, value=list(response.json().values()))
-
-    @task
-    def create_index(index_name):
-        response = hook_put.run(
-            endpoint=f'/{index_name}',
-            headers={'Accept': 'application/json'},
-            data=json.dumps(INDEX_SETTINGS_AND_MAPPINGS)
-        )
-        hook_get.check_response(response)
-        return response.json()
 
     @task(task_id="extract")
     @chain_on_success
@@ -198,32 +242,25 @@ def fnv():
 
     @task_group
     def missing_aliases():
-        fetched_aliases = fetch_aliases()
-        fetched_indices = fetch_indices()
-        return push(add_missing_aliases.expand(data=indices_with_missing_aliases(fetched_indices, alias_per_index(fetched_aliases))))
-
-    @task
-    def add_missing_aliases(data):
-        index = data["key"]
-        aliases = generate_aliases(index)
-        return success(key=index, value=aliases)
-
+        fetched_aliases = fetch_aliases(hook_get)
+        fetched_indices = fetch_indices(hook_get)
+        return push(add_aliases.partial(hook=hook_post).expand(data=indices_with_missing_aliases(fetched_indices, alias_per_index(fetched_aliases))))
 
     @task_group
     def reconcile_aliases():
-        fetched_aliases = fetch_aliases()
+        fetched_aliases = fetch_aliases(hook_get)
         return push(group_aliases_by_instance(fetched_aliases))
 
     @task_group
     def lifecycle_settings(data):
-        f = fetch_alias_settings.expand(data=data)
-        e = extract_ilm_setting.expand(data=f)
+        f = fetch_alias_settings.partial(hook=hook_get).expand(data=data)
+        e = extract_ilm_setting.partial(hook=hook_get).expand(data=f)
         print_errors(e)
         return push(filter_errors(e))
 
     @task_group
     def mappings(data):
-        f = fetch_alias_mappings.expand(data=data)
+        f = fetch_alias_mappings.partial(hook=hook_get).expand(data=data)
         e = extract_mapping.expand(data=f)
         print_errors(e)
         return push(filter_errors(e))
