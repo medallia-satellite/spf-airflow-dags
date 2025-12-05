@@ -181,8 +181,9 @@ def fnv():
         return push(filter_errors(processed))
 
     mm = add_missing_aliases()
-    p = add_missing_months(lifecycle_settings(data=mappings(data=reconcile_aliases())))
+    a = reconcile_aliases()
+    p = add_missing_months(lifecycle_settings(data=mappings(data=a)))
 
-    mm >> p
+    mm >> a
 
 fnv()
