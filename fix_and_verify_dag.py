@@ -1,103 +1,12 @@
-import datetime
-import json
 from collections import defaultdict
 
-from airflow.decorators import task, dag, task_group
+from airflow.decorators import dag, task_group
 from airflow.providers.http.hooks.http import HttpHook
 
+from repo.elasticsearch_client import *
 from repo.fix_and_verify import *
 from repo.utils import *
 
-@task
-def fetch_aliases(hook):
-    response = hook.run(
-        endpoint='/_cat/aliases?h=alias,index,is_write_index',
-        headers={'Accept': 'application/json'},
-    )
-    hook.check_response(response)
-    return [r for r in response.json() if BASE_REGEX.match(r["alias"])]
-
-
-@task
-def fetch_indices(hook):
-    response = hook.run(
-        endpoint='/_cat/indices?h=index&format=json',
-        headers={'Accept': 'application/json'},
-    )
-    hook.check_response(response)
-    return [r["index"] for r in response.json() if INDEX_REGEX.match(r["index"])]
-
-
-@task(task_id="fetch")
-def fetch_alias_settings(hook, data):
-    alias = data["key"]
-    response = hook.run(
-        endpoint=f'/{alias}/_settings/'
-                 f'index.lifecycle.name,'
-                 f'index.lifecycle.rollover_alias',
-        headers={'Accept': 'application/json'},
-    )
-    hook.check_response(response)
-    return success(key=alias, value=list(response.json().values()))
-
-
-@task(task_id="fetch")
-def fetch_alias_mappings(hook, data):
-    alias = data["key"]
-    response = hook.run(
-        endpoint=f'/{alias}/_mapping',
-        headers={'Accept': 'application/json'},
-    )
-    hook.check_response(response)
-    return success(key=alias, value=list(response.json().values()))
-
-
-@task
-def create_index(hook, index_name):
-    response = hook.run(
-        endpoint=f'/{index_name}',
-        headers={'Accept': 'application/json'},
-        data=json.dumps(INDEX_SETTINGS_AND_MAPPINGS)
-    )
-    hook.check_response(response)
-    return response.json()
-
-
-@task
-def add_aliases(hook, data):
-    index = data["key"]
-    aliases = generate_aliases(index)
-    actions = [
-        {
-            "add": {
-                "index": index,
-                "alias": aliases["read"],
-                "is_write_index": False,
-            }
-        },
-        {
-            "add": {
-                "index": index,
-                "alias": aliases["write"],
-                "is_write_index": True,
-            }
-        },
-        {
-            "add": {
-                "index": index,
-                "alias": aliases["rollover"],
-                "is_write_index": False,
-            }
-        },
-
-    ]
-    response = hook.run(
-        endpoint=f'/_aliases',
-        headers={'Accept': 'application/json'},
-        data=json.dumps({"actions": actions})
-    )
-    hook.check_response(response)
-    return success(key=data["key"], value=response.json())
 
 @dag(
     dag_display_name="FNV",
