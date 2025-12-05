@@ -52,9 +52,10 @@ def fetch_alias_mappings(hook, data):
 
 @task
 def create_index(hook, index_name):
+    return success(key=index_name, value=json.dumps(INDEX_SETTINGS_AND_MAPPINGS))
     response = hook.run(
         endpoint=f'/{index_name}',
-        headers={'Accept': 'application/json'},
+        headers={'Content-Type': 'application/json'},
         data=json.dumps(INDEX_SETTINGS_AND_MAPPINGS)
     )
     hook.check_response(response)
@@ -92,7 +93,7 @@ def add_aliases(hook, data):
     return success(key=data["key"], value=actions)
     response = hook.run(
         endpoint=f'/_aliases',
-        headers={'Accept': 'application/json'},
+        headers={'Content-Type': 'application/json'},
         data=json.dumps({"actions": actions})
     )
     hook.check_response(response)

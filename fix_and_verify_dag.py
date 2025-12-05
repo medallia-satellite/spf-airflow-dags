@@ -64,98 +64,50 @@ def fnv():
 
         return success(key=instance, value=result)
 
-    @task(task_id="aliases_by_instance")
-    def group_aliases_by_instance(all_aliases: list):
-        grouped = defaultdict(list)
-        for alias_entry in all_aliases:
-            alias = alias_entry["alias"]
-            if not any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
-                continue
-            grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
-
-        return [success(key=k, value=v) for k, v in grouped.items()]
-
-    @chain_on_success
-    def extract_instance_details(data):
-        instance = data["key"]
-
-        indices = [a["index"] for a in data["value"]]
-        if not any(INDEX_REGEX.fullmatch(i) for i in indices):
-            return failure(key=instance, error=f"Invalid indices {indices=}")
-
-        t = set(tenant_id_from_index(i) for i in indices)
-        if len(t) != 1:
-            return failure(key=instance, error=f"Multiple tenant_ids found {indices=}")
 
 
-        aliases = retrieve("reconcile_aliases", instance)
-        num_months = retrieve("lifecycle_settings", instance)["retention"]
-        indices = [a["index"] for a in aliases]
-
-        return success(key=instance, value="")
-
-    @task
-    def identify_missing_months(data):
-        regex = ALIAS_REGEX_MAPPING["write"]
-
-        instance = data["key"]
-        aliases = retrieve("reconcile_aliases", instance)
-        num_months = retrieve("lifecycle_settings", instance)["retention"]
-
-        write_aliases = {alias['alias']: alias["index"] for alias in aliases if
-                regex.fullmatch(alias['alias']) and alias["is_write_index"]}
-
-        today = datetime.date.today()
-        start_date = today.replace(day=1) + relativedelta(months=1)
-
-        missing_aliases = []
-        for monthly_alias in monthly_aliases(instance, start_date, num_months):
-            if monthly_alias not in write_aliases:
-                missing_aliases.append(monthly_alias)
-
-        return success(key=instance, value=missing_aliases)
-
-    @task
-    def aaaaaaaaa(data):
-        instance = "aa_topic-builder-aa.medallia.com-aa"
-        tenant_id = "101485"
-        date = "2024-06-01"
-        suffix = "000004"
-        result = {
-            "index_name": f"%3Cseaas-{instance}-%7B{date}%7Byyyy-MM-dd%7D%7D-{tenant_id}-{suffix}%3E"
-        }
-        return success(key=data["key"], value=result)
-
-    @task
-    def alias_per_index(aliases):
-        result = defaultdict(list)
-        for alias_entry in aliases:
-            index = alias_entry["index"]
-            if not INDEX_REGEX.fullmatch(index):
-                continue
-            result[index].append(alias_entry["alias"])
-        return result
-
-    @task
-    def indices_with_missing_aliases(indices, aliases):
-        result = []
-        for index in indices:
-            if index not in aliases:
-                print(f"{index} - no alias")
-                result.append(success(key=index, value=None))
-            elif len(aliases[index]) < 3:
-                print(f"{index} - {aliases[index]}")
-                result.append(success(key=index, value=None))
-        return result
 
     @task_group
-    def missing_aliases():
-        fetched_aliases = fetch_aliases(hook=hook_get)
-        fetched_indices = fetch_indices(hook=hook_get)
-        return push(add_aliases.partial(hook=hook_post).expand(data=indices_with_missing_aliases(fetched_indices, alias_per_index(fetched_aliases))))
+    def add_missing_aliases():
+        @task
+        def group_aliases_by_index(aliases):
+            result = defaultdict(list)
+            for alias_entry in aliases:
+                index = alias_entry["index"]
+                if not INDEX_REGEX.fullmatch(index):
+                    continue
+                result[index].append(alias_entry["alias"])
+            return result
+
+        @task
+        def indices_with_missing_aliases(indices, aliases):
+            result = []
+            for index in indices:
+                if index not in aliases:
+                    print(f"{index} - no alias")
+                    result.append(success(key=index, value=None))
+                elif len(aliases[index]) < 3:
+                    print(f"{index} - {aliases[index]}")
+                    result.append(success(key=index, value=None))
+            return result
+
+        a = fetch_aliases(hook=hook_get)
+        i = fetch_indices(hook=hook_get)
+        m = indices_with_missing_aliases(i, group_aliases_by_index(a))
+        return push(add_aliases.partial(hook=hook_post).expand(data=m))
 
     @task_group
     def reconcile_aliases():
+        @task(task_id="aliases_by_instance")
+        def group_aliases_by_instance(aliases: list):
+            grouped = defaultdict(list)
+            for alias_entry in aliases:
+                alias = alias_entry["alias"]
+                if not any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
+                    continue
+                grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
+            return [success(key=k, value=v) for k, v in grouped.items()]
+
         fetched_aliases = fetch_aliases(hook=hook_get)
         return push(group_aliases_by_instance(fetched_aliases))
 
@@ -173,14 +125,64 @@ def fnv():
         print_errors(e)
         return push(filter_errors(e))
 
+    @task
+    def aaaaaaaaa(data):
+        instance = "aa_topic-builder-aa.medallia.com-aa"
+        tenant_id = "101485"
+        date = "2024-06-01"
+        suffix = "000004"
+        result = {
+            "index_name": f"%3Cseaas-{instance}-%7B{date}%7Byyyy-MM-dd%7D%7D-{tenant_id}-{suffix}%3E"
+        }
+        return success(key=data["key"], value=result)
+
+    @task
+    @chain_on_success
+    def extract_instance_details(data):
+        instance = data["key"]
+        indices = [a["index"] for a in data["value"]]
+        if not any(INDEX_REGEX.fullmatch(i) for i in indices):
+            return failure(key=instance, error=f"Invalid indices {indices=}")
+
+        t = set(tenant_id_from_index(i) for i in indices)
+        if len(t) != 1:
+            return failure(key=instance, error=f"Multiple tenant_ids found {indices=}")
+
+        aliases = retrieve("reconcile_aliases", instance)
+        num_months = retrieve("lifecycle_settings", instance)["retention"]
+        indices = [a["index"] for a in aliases]
+
+        return success(key=instance, value="")
+
+    @task
+    def identify_missing_months(data):
+        instance = data["key"]
+        aliases = retrieve("reconcile_aliases", instance)
+        num_months = retrieve("lifecycle_settings", instance)["retention"]
+
+        write_aliases = {alias['alias']: alias["index"] for alias in aliases if
+                ALIAS_REGEX_MAPPING["write"].fullmatch(alias['alias']) and alias["is_write_index"]}
+
+        today = datetime.date.today()
+        start_date = today.replace(day=1) + relativedelta(months=1)
+
+        missing_aliases = []
+        for monthly_alias in monthly_aliases(instance, start_date, num_months):
+            if monthly_alias not in write_aliases:
+                missing_aliases.append(monthly_alias)
+
+        return success(key=instance, value=missing_aliases)
+
     @task_group
-    def prepare_missing_months(data):
+    def add_missing_months(data):
         missing_months = identify_missing_months.expand(data=data)
         filtered = filter_empty(missing_months)
         processed = aaaaaaaaa.expand(data=filtered)
         return push(filter_errors(processed))
 
-    missing_aliases()
-    prepare_missing_months(lifecycle_settings(data=mappings(data=reconcile_aliases())))
+    mm = add_missing_aliases()
+    p = add_missing_months(lifecycle_settings(data=mappings(data=reconcile_aliases())))
+
+    mm >> p
 
 fnv()
