@@ -140,50 +140,54 @@ def fnv():
     @chain_on_success
     def extract_instance_details(data):
         instance = data["key"]
-        indices = [a["index"] for a in data["value"]]
+        aliases = retrieve("reconcile_aliases", instance)
+        indices = [x["index"] for x in aliases]
+
         if not any(INDEX_REGEX.fullmatch(i) for i in indices):
             return failure(key=instance, error=f"Invalid indices {indices=}")
 
-        t = set(tenant_id_from_index(i) for i in indices)
+        t = list(set(tenant_id_from_index(i) for i in indices))
         if len(t) != 1:
             return failure(key=instance, error=f"Multiple tenant_ids found {indices=}")
 
-        aliases = retrieve("reconcile_aliases", instance)
-        num_months = retrieve("lifecycle_settings", instance)["retention"]
-        indices = [a["index"] for a in aliases]
-
-        return success(key=instance, value="")
+        tenant_id = t[0]
+        suffix = "000001"
+        indices = [f"%3Cseaas-{instance}-%7B{date}%7Byyyy-MM-dd%7D%7D-{tenant_id}-{suffix}%3E" for date in data["value"]]
+        return success(key=instance, value=indices)
 
     @task
     def identify_missing_months(data):
         instance = data["key"]
-        aliases = retrieve("reconcile_aliases", instance)
+        aliases = [alias['alias'] for alias in retrieve("reconcile_aliases", instance)]
         num_months = retrieve("lifecycle_settings", instance)["retention"]
-
-        write_aliases = {alias['alias']: alias["index"] for alias in aliases if
-                ALIAS_REGEX_MAPPING["write"].fullmatch(alias['alias']) and alias["is_write_index"]}
 
         today = datetime.date.today()
         start_date = today.replace(day=1) + relativedelta(months=1)
 
-        missing_aliases = []
-        for monthly_alias in monthly_aliases(instance, start_date, num_months):
-            if monthly_alias not in write_aliases:
-                missing_aliases.append(monthly_alias)
+        missing = []
+        for month, monthly_alias in monthly_aliases(instance, start_date, num_months):
+            if monthly_alias not in aliases:
+                missing.append(month)
 
-        return success(key=instance, value=missing_aliases)
+        return success(key=instance, value=missing)
 
     @task_group
-    def add_missing_months(data):
-        missing_months = identify_missing_months.expand(data=data)
-        filtered = filter_empty(missing_months)
-        processed = aaaaaaaaa.expand(data=filtered)
-        return push(filter_errors(processed))
+    def missing_months(data):
+        m = identify_missing_months.expand(data=data)
+        filtered = filter_empty(m)
+        return push(filter_errors(filtered))
+
+
+    @task_group
+    def create_monthly_indices(data):
+        m = identify_missing_months.expand(data=data)
+        filtered = filter_empty(m)
+        return push(filter_errors(extract_instance_details.expand(data=filtered)))
 
     mm = add_missing_aliases()
     a = reconcile_aliases()
-    p = add_missing_months(lifecycle_settings(data=mappings(data=a)))
-
+    p = missing_months(lifecycle_settings(data=mappings(data=a)))
+    create_monthly_indices(p)
     mm >> a
 
 fnv()

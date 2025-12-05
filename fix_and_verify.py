@@ -1,6 +1,6 @@
 import datetime
 import re
-from typing import Iterator
+from typing import Iterator, Tuple
 
 from dateutil.relativedelta import relativedelta
 
@@ -109,8 +109,8 @@ INDEX_SETTINGS_AND_MAPPINGS = {
 }
 
 
-def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[str]:
+def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[Tuple[str, str]]:
     current_date = start_date
     for _ in range(num_months):
-        yield f"{alias}-{current_date:%Y-%m-%d}"
+        yield f"{current_date:%Y-%m-%d}", f"{alias}-{current_date:%Y-%m-%d}"
         current_date -= relativedelta(months=1)
