@@ -96,7 +96,7 @@ def verify_monthly_indices_dag():
             mapping[alias_entry["index"]].append(alias_entry["alias"])
 
         if any(len(aliases) < 3 for aliases in mapping.values()):
-            return failure(key=data["key"], error=f"Too few aliases: {[(index, aliases) for index, aliases in mapping.items() if len(aliases) < 3]}")
+            return failure(key=data["key"], error=f"Too few aliases: {', '.join([(index, aliases) for index, aliases in mapping.items() if len(aliases) < 3])}")
         else:
             return success(key=data["key"], value="")
 
