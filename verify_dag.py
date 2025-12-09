@@ -100,7 +100,7 @@ def verify_monthly_indices_dag():
 
     @task_group
     def missing_aliases(data):
-        grouped = group_aliases_by_index(data=data)
+        grouped = group_aliases_by_index.expand(data=data)
         r = check_indices_with_3_aliases.expand(data=grouped)
         print_errors(r)
         return push(filter_errors(r))
