@@ -65,47 +65,45 @@ def verify_monthly_indices_dag():
 
 
     @task_group
-    def add_missing_aliases():
+    def fetch_aliases_and_indices_by_tenant():
         @task
-        def group_aliases_by_index(aliases):
+        def group_by_tenant(aliases: list):
             result = defaultdict(list)
-            for alias_entry in aliases:
-                index = alias_entry["index"]
-                if not INDEX_REGEX.fullmatch(index):
-                    continue
-                result[index].append(alias_entry["alias"])
-            return result
-
-        @task
-        def indices_with_missing_aliases(indices, aliases):
-            result = []
-            for index in indices:
-                if index not in aliases:
-                    print(f"{index} - no alias")
-                    result.append(success(key=index, value=None))
-                elif len(aliases[index]) < 3:
-                    print(f"{index} - {aliases[index]}")
-                    result.append(success(key=index, value=None))
-            return result
-
-        a = fetch_aliases(hook=hook_get)
-        i = fetch_indices(hook=hook_get)
-        return push(indices_with_missing_aliases(i, group_aliases_by_index(a)))
-
-    @task_group
-    def reconcile_aliases():
-        @task(task_id="aliases_by_instance")
-        def group_aliases_by_instance(aliases: list):
-            grouped = defaultdict(list)
             for alias_entry in aliases:
                 alias = alias_entry["alias"]
                 if not any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
                     continue
-                grouped[BASE_REGEX.match(alias).group(0)].append(alias_entry)
-            return [success(key=k, value=v) for k, v in grouped.items()]
+                result[BASE_REGEX.match(alias).group(0)].append(alias_entry)
+            return [success(key=k, value=v) for k, v in result.items()]
 
-        fetched_aliases = fetch_aliases(hook=hook_get)
-        return push(group_aliases_by_instance(fetched_aliases))
+        fetched = fetch_aliases(hook=hook_get)
+        grouped = group_by_tenant(fetched)
+        return push(grouped)
+
+    @task
+    def group_aliases_by_index(data):
+        result = defaultdict(list)
+        for alias_entry in data["value"]:
+            result[alias_entry["index"]].append(alias_entry["alias"])
+        return result
+
+    @task
+    def check_indices_with_3_aliases(data):
+        mapping = defaultdict(list)
+        for alias_entry in data["value"]:
+            mapping[alias_entry["index"]].append(alias_entry["alias"])
+
+        if any(len(aliases) < 3 for aliases in mapping.values()):
+            return failure(key=data["key"], error=f"Too few aliases: {[(index, aliases) for index, aliases in mapping.items() if len(aliases) < 3]}")
+        else:
+            return success(key=data["key"], value="")
+
+    @task_group
+    def missing_aliases(data):
+        grouped = group_aliases_by_index(data=data)
+        r = check_indices_with_3_aliases.expand(data=grouped)
+        print_errors(r)
+        return push(filter_errors(r))
 
     @task_group
     def lifecycle_settings(data):
@@ -121,10 +119,11 @@ def verify_monthly_indices_dag():
         print_errors(e)
         return push(filter_errors(e))
 
+
     @task
     def identify_missing_months(data):
         instance = data["key"]
-        aliases = [alias['alias'] for alias in retrieve("reconcile_aliases", instance)]
+        aliases = [alias['alias'] for alias in retrieve("fetch_aliases_and_indices_by_tenant", instance)]
         num_months = retrieve("lifecycle_settings", instance)["retention"]
 
         today = datetime.date.today()
@@ -144,6 +143,6 @@ def verify_monthly_indices_dag():
         return push(filter_errors(filtered))
 
 
-    return missing_months(lifecycle_settings(data=mappings(data=reconcile_aliases())))
+    return missing_months(lifecycle_settings(data=mappings(data=missing_aliases(data=fetch_aliases_and_indices_by_tenant()))))
 
 verify_monthly_indices_dag()
