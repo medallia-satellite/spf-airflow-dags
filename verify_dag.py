@@ -91,12 +91,9 @@ def verify_monthly_indices_dag():
 
     @task
     def check_indices_with_3_aliases(data):
-        mapping = defaultdict(list)
-        for alias_entry in data["value"]:
-            mapping[alias_entry["index"]].append(alias_entry["alias"])
-
-        if any(len(aliases) < 3 for aliases in mapping.values()):
-            return failure(key=data["key"], error=f"Too few aliases: {', '.join([(index, aliases) for index, aliases in mapping.items() if len(aliases) < 3])}")
+        if any(len(aliases) < 3 for aliases in data["value"].values()):
+            result = {i: a for i,a in data["value"].items() if len(a) < 3}
+            return failure(key=data["key"], error=f"Too few aliases: {result=}")
         else:
             return success(key=data["key"], value="")
 
