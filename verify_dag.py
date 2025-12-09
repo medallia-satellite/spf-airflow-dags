@@ -87,7 +87,7 @@ def verify_monthly_indices_dag():
         result = defaultdict(list)
         for alias_entry in aliases:
             result[alias_entry["index"]].append(alias_entry["alias"])
-        return success(key=instance, value=result)
+        return success(key=instance, value=dict(result))
 
     @task
     def check_indices_with_3_aliases(data):
