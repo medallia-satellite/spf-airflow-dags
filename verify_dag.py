@@ -82,8 +82,10 @@ def verify_monthly_indices_dag():
 
     @task
     def group_aliases_by_index(data):
+        instance = data["key"]
+        aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
         result = defaultdict(list)
-        for alias_entry in data["value"]:
+        for alias_entry in aliases:
             result[alias_entry["index"]].append(alias_entry["alias"])
         return result
 
