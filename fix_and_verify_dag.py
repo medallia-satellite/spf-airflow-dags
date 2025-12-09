@@ -28,6 +28,9 @@ def fnv():
         if not all(m == sample for m in _mappings):
             return failure(key=data["key"], error=f"different mappings {_mappings}")
 
+        if sample != default_index_mappings():
+            return failure(key=data["key"], error=f"invalid mapping {sample}")
+
         return success(key=data["key"], value=sample)
 
     @task(task_id="extract")
@@ -151,6 +154,7 @@ def fnv():
             return failure(key=instance, error=f"Multiple tenant_ids found {indices=}")
 
         tenant_id = t[0]
+
         suffix = "000001"
         indices = [f"%3Cseaas-{instance}-%7B{date}%7Byyyy-MM-dd%7D%7D-{tenant_id}-{suffix}%3E" for date in data["value"]]
         return success(key=instance, value=indices)
@@ -186,8 +190,7 @@ def fnv():
 
     mm = add_missing_aliases()
     a = reconcile_aliases()
-    p = missing_months(lifecycle_settings(data=mappings(data=a)))
-    create_monthly_indices(p)
     mm >> a
+    create_monthly_indices(missing_months(lifecycle_settings(data=mappings(data=a))))
 
 fnv()

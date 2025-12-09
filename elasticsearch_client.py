@@ -2,7 +2,7 @@ import json
 
 from airflow.decorators import task
 
-from repo.fix_and_verify import BASE_REGEX, INDEX_REGEX, INDEX_SETTINGS_AND_MAPPINGS, generate_aliases
+from repo.fix_and_verify import *
 from repo.utils import success
 
 
@@ -52,11 +52,11 @@ def fetch_alias_mappings(hook, data):
 
 @task
 def create_index(hook, index_name):
-    return success(key=index_name, value=json.dumps(INDEX_SETTINGS_AND_MAPPINGS))
+    return success(key=index_name, value=json.dumps(default_index_settings_and_mappings()))
     response = hook.run(
         endpoint=f'/{index_name}',
         headers={'Content-Type': 'application/json'},
-        data=json.dumps(INDEX_SETTINGS_AND_MAPPINGS)
+        data=json.dumps(default_index_settings_and_mappings())
     )
     hook.check_response(response)
     return response.json()

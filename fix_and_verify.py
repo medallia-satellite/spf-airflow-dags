@@ -9,6 +9,12 @@ BASE_REGEX = re.compile(BASE_PATTERN)
 INDEX_PATTERN = rf"^seaas-{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
 INDEX_REGEX = re.compile(INDEX_PATTERN)
 
+def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[Tuple[str, str]]:
+    current_date = start_date
+    for _ in range(num_months):
+        yield f"{current_date:%Y-%m-%d}", f"{alias}-{current_date:%Y-%m-%d}"
+        current_date -= relativedelta(months=1)
+
 def generate_aliases(index):
     read_alias = ALIAS_REGEX_MAPPING["read"].search(index).group(0)
     write_alias = ALIAS_REGEX_MAPPING["write"].search(index).group(0)
@@ -36,8 +42,14 @@ POLICY_MAPPING = {
 	"M36": 36,
 	"M36_rollover": 36,
 }
-INDEX_SETTINGS_AND_MAPPINGS = {
-    "settings": {
+def default_index_settings_and_mappings():
+    return {
+    "settings": default_index_settings(),
+    "mappings": default_index_mappings()
+}
+
+def default_index_settings():
+    return {
         "analysis": {
             "filter": {
                 "compound_capture": {
@@ -60,8 +72,10 @@ INDEX_SETTINGS_AND_MAPPINGS = {
         },
         "number_of_shards": 1,
         "number_of_replicas": 1
-    },
-    "mappings": {
+    }
+
+def default_index_mappings():
+    return {
         "properties": {
             "comments": {
                 "type": "nested",
@@ -106,11 +120,16 @@ INDEX_SETTINGS_AND_MAPPINGS = {
             }
         }
     }
-}
+
+def generate_index_template(tenant, retention_months):
+    rollover_alias = f"{tenant}-rollover"
+    index_pattern = f"seaas-{tenant}-*"
+    index_template = {
+        "index_patterns": [index_pattern],
+        "template": default_index_settings_and_mappings()
+    }
+    index_template["template"]["settings"]["index.lifecycle.name"] = f"M{retention_months}_rollover"
+    index_template["template"]["settings"]["index.lifecycle.rollover_alias"] = rollover_alias
+    return index_template
 
 
-def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[Tuple[str, str]]:
-    current_date = start_date
-    for _ in range(num_months):
-        yield f"{current_date:%Y-%m-%d}", f"{alias}-{current_date:%Y-%m-%d}"
-        current_date -= relativedelta(months=1)
