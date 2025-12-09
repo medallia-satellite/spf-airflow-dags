@@ -19,7 +19,6 @@ def fnv():
     hook_put = HttpHook(method='PUT', http_conn_id='es-wordtags')
     hook_post = HttpHook(method='POST', http_conn_id='es-wordtags')
 
-
     @task(task_id="extract")
     @chain_on_success
     def extract_mapping(data):
@@ -64,10 +63,7 @@ def fnv():
             "rollover_alias": next(iter(rollover_aliases)),
         }
 
-
         return success(key=instance, value=result)
-
-
 
 
     @task_group
@@ -188,9 +184,9 @@ def fnv():
         filtered = filter_empty(m)
         return push(filter_errors(extract_instance_details.expand(data=filtered)))
 
-    mm = add_missing_aliases()
-    a = reconcile_aliases()
-    mm >> a
-    create_monthly_indices(missing_months(lifecycle_settings(data=mappings(data=a))))
+    tg_a = add_missing_aliases()
+    tg_b = reconcile_aliases()
+    tg_a >> tg_b
+    tg_c = create_monthly_indices(missing_months(lifecycle_settings(data=mappings(data=tg_b))))
 
 fnv()
