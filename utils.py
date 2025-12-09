@@ -40,6 +40,10 @@ def chain_on_success(func):
 
 @task
 def filter_errors(data):
+    context = get_current_context()
+    ti = context["ti"]
+    ti.xcom_push("errors",[d for d in data if not d["success"]])
+
     results = [d for d in data if d["success"]]
     print(f"Collected {len(results)} successes.")
     return results
@@ -56,6 +60,16 @@ def print_errors(data):
     print(f"Errors found: {len(results)}")
     print(json.dumps(results, indent=2))
     return results
+
+@task
+def report_errors(stages):
+    context = get_current_context()
+    ti = context["ti"]
+    for stage in stages:
+        errors = ti.xcom_pull(task_ids=f"{stage}.filter_errors", key="errors")
+        print(f"Errors found in stage {stage}: {len(errors)}")
+        print(json.dumps(errors, indent=2))
+    return
 
 @task(task_id="push")
 def push(data):

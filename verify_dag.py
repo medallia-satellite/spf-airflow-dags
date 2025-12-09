@@ -101,21 +101,18 @@ def verify_monthly_indices_dag():
     def missing_aliases(data):
         grouped = group_aliases_by_index.expand(data=data)
         r = check_indices_with_3_aliases.expand(data=grouped)
-        print_errors(r)
         return push(filter_errors(r))
 
     @task_group
     def lifecycle_settings(data):
         f = fetch_alias_settings.partial(hook=hook_get).expand(data=data)
         e = extract_ilm_setting.expand(data=f)
-        print_errors(e)
         return push(filter_errors(e))
 
     @task_group
     def mappings(data):
         f = fetch_alias_mappings.partial(hook=hook_get).expand(data=data)
         e = extract_mapping.expand(data=f)
-        print_errors(e)
         return push(filter_errors(e))
 
 
@@ -141,7 +138,9 @@ def verify_monthly_indices_dag():
         filtered = filter_empty(m)
         return push(filter_errors(filtered))
 
-
-    return missing_months(lifecycle_settings(data=mappings(data=missing_aliases(data=fetch_data()))))
+    mm = missing_months(lifecycle_settings(data=mappings(data=missing_aliases(data=fetch_data()))))
+    rr = report_errors(stages=["missing_aliases", "mappings", "lifecycle_settings", "missing_months"])
+    mm >> rr
+    return rr
 
 verify_monthly_indices_dag()
