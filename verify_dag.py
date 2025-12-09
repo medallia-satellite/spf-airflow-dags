@@ -65,7 +65,7 @@ def verify_monthly_indices_dag():
 
 
     @task_group
-    def fetch_aliases_and_indices_by_tenant():
+    def fetch_data():
         @task
         def group_by_tenant(aliases: list):
             result = defaultdict(list)
@@ -123,7 +123,7 @@ def verify_monthly_indices_dag():
     @task
     def identify_missing_months(data):
         instance = data["key"]
-        aliases = [alias['alias'] for alias in retrieve("fetch_aliases_and_indices_by_tenant", instance)]
+        aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
         num_months = retrieve("lifecycle_settings", instance)["retention"]
 
         today = datetime.date.today()
@@ -143,6 +143,6 @@ def verify_monthly_indices_dag():
         return push(filter_errors(filtered))
 
 
-    return missing_months(lifecycle_settings(data=mappings(data=missing_aliases(data=fetch_aliases_and_indices_by_tenant()))))
+    return missing_months(lifecycle_settings(data=mappings(data=missing_aliases(data=fetch_data()))))
 
 verify_monthly_indices_dag()
