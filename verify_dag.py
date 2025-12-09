@@ -25,7 +25,7 @@ def verify_monthly_indices_dag():
         if not all(m == sample for m in _mappings):
             return failure(key=data["key"], error=f"different mappings {_mappings}")
 
-        if sample != default_index_mappings():
+        if sample["mappings"] != default_index_mappings():
             return failure(key=data["key"], error=f"invalid mapping {sample}")
 
         return success(key=data["key"], value=sample)
