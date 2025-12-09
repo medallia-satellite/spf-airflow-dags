@@ -186,7 +186,7 @@ def fnv():
 
     tg_a = add_missing_aliases()
     tg_b = reconcile_aliases()
-    tg_a >> tg_b
     tg_c = create_monthly_indices(missing_months(lifecycle_settings(data=mappings(data=tg_b))))
+    tg_a >> tg_b >> tg_c
 
 fnv()
