@@ -64,8 +64,8 @@ def create_index(hook: HttpHook, index_name: str):
     return response.json()
 
 @task
-def add_aliases(hook: HttpHook, actions: List[dict]):
-    return success(key=actions[0]["index"], value=actions)
+def add_aliases(hook: HttpHook, actions: Result):
+    return success(key=actions["value"][0]["index"], value=actions)
     response = hook.run(
         endpoint=f'/_aliases',
         headers={'Content-Type': 'application/json'},
