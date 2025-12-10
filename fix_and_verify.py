@@ -25,6 +25,9 @@ def generate_aliases(index):
         "rollover": rollover_alias,
     }
 
+def is_write_alias(alias: str) -> bool:
+    return True if ALIAS_REGEX_MAPPING["write"].match(alias) else False
+
 def tenant_id_from_index(index_name):
     m = INDEX_REGEX.fullmatch(index_name).groupdict()
     return m["tenant_id"]

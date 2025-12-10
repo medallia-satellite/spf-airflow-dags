@@ -17,7 +17,7 @@ from repo.utils import *
 )
 def reconcile_aliases_dag():
     @task
-    def group_by_index(aliases: list):
+    def collect_incomplete_alias_sets(aliases: list):
         result = defaultdict(list)
         for alias_entry in aliases:
             index = alias_entry["index"]
@@ -38,9 +38,21 @@ def reconcile_aliases_dag():
             return success(key=index, value=missing)
         return failure(key=index, error=f"No missing aliases: {missing}")
 
+    @task
+    def generate_actions(aliases: Result):
+        index = aliases["key"]
+        actions = []
+        for alias in aliases["value"]:
+            actions.append({
+                "index": index,
+                "alias": alias,
+                "is_write_index": is_write_alias(alias),
+            })
+        return success(key=index, value=actions)
+
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     fetched = fetch_aliases(hook=hook_get)
-    grouped = group_by_index(aliases=fetched)
-    return push(filter_errors(find_missing_aliases.expand(data=grouped)))
+    collected = collect_incomplete_alias_sets(aliases=fetched)
+    return push(filter_errors(generate_actions.expand(aliases=find_missing_aliases.expand(data=collected))))
 
 reconcile_aliases_dag()
