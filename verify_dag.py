@@ -114,26 +114,46 @@ def verify_monthly_indices_dag():
         return push(filter_errors(e))
 
     @task
-    def identify_missing_months(data: Result):
+    def expected_monthly_aliases(data: Result):
         instance = data["key"]
-        instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
-        num_months = retrieve("ilm_settings", instance)["retention"]
-
+        num_months = retrieve("ilm_settings", data["key"])["retention"]
         today = datetime.date.today()
         start_date = today.replace(day=1) + relativedelta(months=1)
+        result = [
+            f"{instance}-{(start_date - relativedelta(months=i)):%Y-%m-%d}"
+            for i in range(num_months)
+        ]
+        return success(key=instance, value=result)
 
-        missing = []
-        for month, monthly_alias in generate_monthly_aliases(instance, start_date, num_months):
-            if monthly_alias not in instance_aliases:
-                missing.append(month)
+    @task
+    def aliases_in_retention(data: Result):
+        instance = data["key"]
+        expected = data["value"]
+        instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
 
-        return success(key=instance, value=missing)
+        missing = [alias for alias in expected if alias not in instance_aliases]
+        if missing:
+            return failure(key=instance, error=f"Missing aliases {missing=}")
+        return success(key=instance, value="")
+
+    @task
+    def expired_aliases(data: Result):
+        instance = data["key"]
+        expected = data["value"]
+        instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
+
+        expired = [alias for alias in instance_aliases if alias not in expected]
+        if expired:
+            return failure(key=instance, error=f"Expired aliases {expired=}")
+        return success(key=instance, value="")
 
     @task_group
     def monthly_aliases(data: List[Result]):
-        m = identify_missing_months.expand(data=data)
-        filtered = filter_empty(m)
-        return push(filter_errors(filtered))
+        expected = expected_monthly_aliases.expand(data=data)
+        a = filter_errors(aliases_in_retention.expand(data=expected))
+        e = filter_errors(expired_aliases.expand(data=expected))
+
+        return push(filter_errors(a.concat(e)))
 
     fetch_data_tg = fetch_data()
     aliases_tg = aliases(fetch_data_tg)
