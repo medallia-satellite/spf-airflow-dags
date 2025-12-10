@@ -17,30 +17,21 @@ from repo.utils import *
 )
 def reconcile_aliases_dag():
     @task
-    def group_by_index(aliases: list):
+    def group_by_index_and_filter(aliases: list):
         result = defaultdict(list)
         for alias_entry in aliases:
             index = alias_entry["index"]
             alias = alias_entry["alias"]
             if not INDEX_REGEX.fullmatch(index):
                 continue
-            if not any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
+            if any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
                 continue
             result[index].append(alias)
         return [success(key=k, value=v) for k, v in result.items() if len(v) < 3]
 
-
-    @task
-    def check_indices_with_3_aliases(aliases: Result):
-        if len(aliases["value"]) < 3 :
-            return failure(key=aliases["key"], error=f"Too few aliases: {aliases['value']}")
-        else:
-            return success(key=aliases["key"], value="")
-
-
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     fetched = fetch_aliases(hook=hook_get)
-    grouped = group_by_index(aliases=fetched)
-    return push(filter_errors(check_indices_with_3_aliases.expand(aliases=grouped)))
+    grouped = group_by_index_and_filter(aliases=fetched)
+    return push(filter_errors(grouped))
 
 reconcile_aliases_dag()
