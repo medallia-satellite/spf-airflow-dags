@@ -135,9 +135,14 @@ def verify_monthly_indices_dag():
         filtered = filter_empty(m)
         return push(filter_errors(filtered))
 
-    mm = monthly_aliases(data=lifecycle_settings(data=mappings(data=aliases(data=fetch_data()))))
-    rr = report_errors(stages=["missing_aliases", "mappings", "lifecycle_settings", "missing_months"])
-    mm >> rr
-    return rr
+    fetch_data_tg = fetch_data()
+    aliases_tg = aliases(fetch_data_tg)
+    mappings_tg = mappings(fetch_data_tg)
+    lifecycle_settings_tg = lifecycle_settings(fetch_data_tg)
+    monthly_aliases_tg = monthly_aliases(lifecycle_settings_tg)
+
+    report_errors_tg = report_errors(stages=["missing_aliases", "mappings", "lifecycle_settings", "missing_months"])
+    [aliases_tg, mappings_tg, monthly_aliases_tg] >> report_errors_tg
+    return report_errors_tg
 
 verify_monthly_indices_dag()
