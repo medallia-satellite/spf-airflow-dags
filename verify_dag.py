@@ -139,7 +139,7 @@ def verify_monthly_indices_dag():
             return success(key=instance, value="")
 
         expected = expected_monthly_aliases.expand(data=data)
-        filtered = filter_errors(aliases_in_retention.expand(expected_aliases=expected))
+        filtered = aliases_in_retention.expand(expected_aliases=expected)
         return push(filter_errors(filtered))
 
 
@@ -154,7 +154,7 @@ def verify_monthly_indices_dag():
             return success(key=instance, value="")
 
         expected = expected_monthly_aliases.expand(data=data)
-        filtered = filter_errors(filter_expired.expand(expected_aliases=expected))
+        filtered = filter_expired.expand(expected_aliases=expected)
         return push(filter_errors(filtered))
 
     fetch_data_tg = fetch_data()
