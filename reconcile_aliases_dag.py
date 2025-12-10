@@ -30,17 +30,17 @@ def reconcile_aliases_dag():
         return [success(key=k, value=v) for k, v in result.items() if len(v) < 3]
 
     @task
-    def aaaaaaa(data: Result):
+    def find_missing_aliases(data: Result):
         index = data["key"]
         aliases = data["value"]
         missing = set(generate_aliases(index).values()) - set(aliases)
         if missing:
-            return failure(key=index, error=f"Missing aliases: {missing}")
-        return success(key=index, value="")
+            return success(key=index, value=missing)
+        return failure(key=index, error=f"No missing aliases: {missing}")
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     fetched = fetch_aliases(hook=hook_get)
     grouped = group_by_index(aliases=fetched)
-    return push(filter_errors(aaaaaaa.expand(data=grouped)))
+    return push(filter_errors(find_missing_aliases.expand(data=grouped)))
 
 reconcile_aliases_dag()
