@@ -24,7 +24,7 @@ def reconcile_aliases_dag():
             alias = alias_entry["alias"]
             if not INDEX_REGEX.fullmatch(index):
                 continue
-            if any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
+            if not any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
                 continue
             result[index].append(alias)
         return [success(key=k, value=v) for k, v in result.items() if len(v) < 3]
