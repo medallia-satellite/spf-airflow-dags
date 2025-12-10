@@ -37,24 +37,24 @@ def verify_monthly_indices_dag():
         il_list = [s["settings"]["index"]["lifecycle"] for s in data["value"]]
 
         if any("name" not in il for il in il_list):
-            return failure(key=instance, error=f"No lifecycle policy {il_list=}")
+            return failure(key=instance, error=f"Invalid policies: {il_list}")
 
         policies = set(il["name"] for il in il_list)
         if not all(p in POLICY_MAPPING for p in policies):
-            return failure(key=instance, error=f"Invalid policies: {policies=}")
+            return failure(key=instance, error=f"Invalid policies: {policies}")
 
         if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-            return failure(key=instance, error=f"Retention period is not unique: {policies=}")
+            return failure(key=instance, error=f"Retention period is not unique: {policies}")
 
         if any("rollover_alias" not in il for il in il_list):
             return failure(key=instance, error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
 
         rollover_aliases = set(il["rollover_alias"] for il in il_list)
         if not all(ALIAS_REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
-            return failure(key=instance, error=f"Invalid rollover alias {rollover_aliases=}")
+            return failure(key=instance, error=f"Invalid rollover alias {rollover_aliases}")
 
         if len(rollover_aliases) != 1:
-            return failure(key=instance, error="Invalid rollover alias {rollover_aliases=}")
+            return failure(key=instance, error=f"Rollover alias is not unique {rollover_aliases}")
 
         result = {
             "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
@@ -125,8 +125,6 @@ def verify_monthly_indices_dag():
         ]
         return success(key=instance, value=result)
 
-
-
     @task_group
     def monthly_aliases(data: List[Result]):
         @task
@@ -142,7 +140,6 @@ def verify_monthly_indices_dag():
         expected = expected_monthly_aliases.expand(data=data)
         filtered = aliases_in_retention.expand(expected_aliases=expected)
         return push(filter_errors(filtered))
-
 
     @task_group
     def expired_aliases(data: List[Result]):
@@ -167,6 +164,7 @@ def verify_monthly_indices_dag():
     expired_aliases_tg = expired_aliases(lifecycle_settings_tg)
 
     report_errors_tg = report_errors(stages=["aliases", "mappings", "ilm_settings", "monthly_aliases", "expired_aliases"])
+
     [aliases_tg, mappings_tg, monthly_aliases_tg, expired_aliases_tg] >> report_errors_tg
     return report_errors_tg
 
