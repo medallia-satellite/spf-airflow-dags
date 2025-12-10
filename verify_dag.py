@@ -137,8 +137,7 @@ def verify_monthly_indices_dag():
                 return failure(key=instance, error=f"Missing aliases {missing=}")
             return success(key=instance, value="")
 
-        expected = expected_monthly_aliases.expand(data=data)
-        filtered = aliases_in_retention.expand(expected_aliases=expected)
+        filtered = aliases_in_retention.expand(expected_aliases=data)
         return push(filter_errors(filtered))
 
     @task_group
@@ -152,16 +151,16 @@ def verify_monthly_indices_dag():
                 return failure(key=instance, error=f"Expired aliases {expired=}")
             return success(key=instance, value="")
 
-        expected = expected_monthly_aliases.expand(data=data)
-        filtered = filter_expired.expand(expected_aliases=expected)
+        filtered = filter_expired.expand(expected_aliases=data)
         return push(filter_errors(filtered))
 
     fetch_data_tg = fetch_data()
     aliases_tg = aliases(fetch_data_tg)
     mappings_tg = mappings(fetch_data_tg)
     lifecycle_settings_tg = ilm_settings(fetch_data_tg)
-    monthly_aliases_tg = monthly_aliases(lifecycle_settings_tg)
-    expired_aliases_tg = expired_aliases(lifecycle_settings_tg)
+    t = expected_monthly_aliases.expand(data=lifecycle_settings_tg)
+    monthly_aliases_tg = monthly_aliases(t)
+    expired_aliases_tg = expired_aliases(t)
 
     report_errors_tg = report_errors(stages=["aliases", "mappings", "ilm_settings", "monthly_aliases", "expired_aliases"])
 
