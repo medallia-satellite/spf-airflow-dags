@@ -3,9 +3,9 @@ from collections import defaultdict
 from airflow.decorators import dag
 from airflow.providers.http.hooks.http import HttpHook
 
-from elasticsearch_client import *
-from fix_and_verify import *
-from utils import *
+from repo.elasticsearch_client import *
+from repo.fix_and_verify import *
+from repo.utils import *
 
 
 @dag(
