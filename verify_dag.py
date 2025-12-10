@@ -102,7 +102,7 @@ def verify_monthly_indices_dag():
         return push(filter_errors(r))
 
     @task_group
-    def lifecycle_settings(data: List[Result]):
+    def ilm_settings(data: List[Result]):
         f = fetch_alias_settings.partial(hook=hook_get).expand(data=data)
         e = extract_ilm_setting.expand(data=f)
         return push(filter_errors(e))
@@ -117,7 +117,7 @@ def verify_monthly_indices_dag():
     def identify_missing_months(data: Result):
         instance = data["key"]
         instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
-        num_months = retrieve("lifecycle_settings", instance)["retention"]
+        num_months = retrieve("ilm_settings", instance)["retention"]
 
         today = datetime.date.today()
         start_date = today.replace(day=1) + relativedelta(months=1)
@@ -138,10 +138,10 @@ def verify_monthly_indices_dag():
     fetch_data_tg = fetch_data()
     aliases_tg = aliases(fetch_data_tg)
     mappings_tg = mappings(fetch_data_tg)
-    lifecycle_settings_tg = lifecycle_settings(fetch_data_tg)
+    lifecycle_settings_tg = ilm_settings(fetch_data_tg)
     monthly_aliases_tg = monthly_aliases(lifecycle_settings_tg)
 
-    report_errors_tg = report_errors(stages=["missing_aliases", "mappings", "lifecycle_settings", "missing_months"])
+    report_errors_tg = report_errors(stages=["aliases", "mappings", "ilm_settings", "monthly_aliases"])
     [aliases_tg, mappings_tg, monthly_aliases_tg] >> report_errors_tg
     return report_errors_tg
 
