@@ -16,6 +16,8 @@ from repo.utils import *
     catchup=False,
 )
 def reconcile_aliases_dag():
+    hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
+
     @task
     def collect_incomplete_alias_sets(aliases: list):
         result = defaultdict(list)
@@ -30,29 +32,18 @@ def reconcile_aliases_dag():
         return [success(key=k, value=v) for k, v in result.items() if len(v) < 3]
 
     @task
-    def find_missing_aliases(data: Result):
-        index = data["key"]
-        aliases = data["value"]
-        missing = set(generate_aliases(index).values()) - set(aliases)
-        if missing:
-            return success(key=index, value=missing)
-        return failure(key=index, error=f"No missing aliases: {missing}")
-
-    @task
     def generate_actions(aliases: Result):
         index = aliases["key"]
-        actions = []
-        for alias in aliases["value"]:
-            actions.append({
-                "index": index,
-                "alias": alias,
-                "is_write_index": is_write_alias(alias),
-            })
-        return success(key=index, value=actions)
+        missing = set(generate_aliases(index).values()) - set(aliases["value"])
+        actions = [{"index": index, "alias": alias,  "is_write_index": is_write_alias(alias)} for alias in missing]
 
-    hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
+        if actions:
+            return success(key=index, value=actions)
+
+        return failure(key=index, error=f"No missing aliases: {aliases['value']}")
+
     fetched = fetch_aliases(hook=hook_get)
     collected = collect_incomplete_alias_sets(aliases=fetched)
-    return push(filter_errors(generate_actions.expand(aliases=find_missing_aliases.expand(data=collected))))
+    return add_aliases.partial(hook=hook_get).expand(actions=generate_actions.expand(aliases=collected))
 
 reconcile_aliases_dag()

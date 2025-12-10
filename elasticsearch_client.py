@@ -1,13 +1,15 @@
 import json
+from typing import List
 
 from airflow.decorators import task
+from airflow.providers.http.hooks.http import HttpHook
 
 from repo.fix_and_verify import *
 from repo.utils import success
 
 
 @task
-def fetch_aliases(hook):
+def fetch_aliases(hook: HttpHook):
     response = hook.run(
         endpoint='/_cat/aliases?h=alias,index,is_write_index',
         headers={'Accept': 'application/json'},
@@ -17,7 +19,7 @@ def fetch_aliases(hook):
 
 
 @task
-def fetch_indices(hook):
+def fetch_indices(hook: HttpHook):
     response = hook.run(
         endpoint='/_cat/indices?h=index&format=json',
         headers={'Accept': 'application/json'},
@@ -27,7 +29,7 @@ def fetch_indices(hook):
 
 
 @task(task_id="fetch")
-def fetch_alias_settings(hook, data):
+def fetch_alias_settings(hook: HttpHook, data: Result):
     alias = data["key"]
     response = hook.run(
         endpoint=f'/{alias}/_settings/'
@@ -40,7 +42,7 @@ def fetch_alias_settings(hook, data):
 
 
 @task(task_id="fetch")
-def fetch_alias_mappings(hook, data):
+def fetch_alias_mappings(hook: HttpHook, data: Result):
     alias = data["key"]
     response = hook.run(
         endpoint=f'/{alias}/_mapping',
@@ -51,7 +53,7 @@ def fetch_alias_mappings(hook, data):
 
 
 @task
-def create_index(hook, index_name):
+def create_index(hook: HttpHook, index_name: str):
     return success(key=index_name, value=json.dumps(default_index_settings_and_mappings()))
     response = hook.run(
         endpoint=f'/{index_name}',
@@ -61,40 +63,13 @@ def create_index(hook, index_name):
     hook.check_response(response)
     return response.json()
 
-
 @task
-def add_aliases(hook, data):
-    index = data["key"]
-    aliases = generate_aliases(index)
-    actions = [
-        {
-            "add": {
-                "index": index,
-                "alias": aliases["read"],
-                "is_write_index": False,
-            }
-        },
-        {
-            "add": {
-                "index": index,
-                "alias": aliases["write"],
-                "is_write_index": True,
-            }
-        },
-        {
-            "add": {
-                "index": index,
-                "alias": aliases["rollover"],
-                "is_write_index": False,
-            }
-        },
-
-    ]
-    return success(key=data["key"], value=actions)
+def add_aliases(hook: HttpHook, actions: List[dict]):
+    return success(key=actions[0]["index"], value=actions)
     response = hook.run(
         endpoint=f'/_aliases',
         headers={'Content-Type': 'application/json'},
         data=json.dumps({"actions": actions})
     )
     hook.check_response(response)
-    return success(key=data["key"], value=response.json())
+    return response.json()
