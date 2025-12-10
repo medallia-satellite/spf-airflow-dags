@@ -125,44 +125,48 @@ def verify_monthly_indices_dag():
         ]
         return success(key=instance, value=result)
 
-    @task
-    def aliases_in_retention(data: Result):
-        instance = data["key"]
-        expected = data["value"]
-        instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
 
-        missing = [alias for alias in expected if alias not in instance_aliases]
-        if missing:
-            return failure(key=instance, error=f"Missing aliases {missing=}")
-        return success(key=instance, value="")
-
-    @task
-    def expired_aliases(data: Result):
-        instance = data["key"]
-        expected = data["value"]
-        instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
-
-        expired = [alias for alias in instance_aliases if alias not in expected]
-        if expired:
-            return failure(key=instance, error=f"Expired aliases {expired=}")
-        return success(key=instance, value="")
 
     @task_group
     def monthly_aliases(data: List[Result]):
-        expected = expected_monthly_aliases.expand(data=data)
-        a = filter_errors(aliases_in_retention.expand(data=expected))
-        e = filter_errors(expired_aliases.expand(data=expected))
+        @task
+        def aliases_in_retention(r: Result):
+            instance = r["key"]
+            instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
 
-        return push(filter_errors(a.concat(e)))
+            if missing := [alias for alias in r["value"] if alias not in instance_aliases]:
+                return failure(key=instance, error=f"Missing aliases {missing=}")
+            return success(key=instance, value="")
+
+        expected = expected_monthly_aliases.expand(data=data)
+        filtered = filter_errors(aliases_in_retention.expand(data=expected))
+        return push(filter_errors(filtered))
+
+
+    @task_group
+    def expired_aliases(data: List[Result]):
+        @task
+        def filter_expired(r: Result):
+            instance = r["key"]
+            instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
+            if expired := [alias for alias in instance_aliases if alias not in r["value"]]:
+                return failure(key=instance, error=f"Expired aliases {expired=}")
+            return success(key=instance, value="")
+
+        expected = expected_monthly_aliases.expand(data=data)
+        filtered = filter_errors(filter_expired.expand(data=expected))
+
+        return push(filter_errors(filtered))
 
     fetch_data_tg = fetch_data()
     aliases_tg = aliases(fetch_data_tg)
     mappings_tg = mappings(fetch_data_tg)
     lifecycle_settings_tg = ilm_settings(fetch_data_tg)
     monthly_aliases_tg = monthly_aliases(lifecycle_settings_tg)
+    expired_aliases_tg = expired_aliases(lifecycle_settings_tg)
 
     report_errors_tg = report_errors(stages=["aliases", "mappings", "ilm_settings", "monthly_aliases"])
-    [aliases_tg, mappings_tg, monthly_aliases_tg] >> report_errors_tg
+    [aliases_tg, mappings_tg, monthly_aliases_tg, expired_aliases_tg] >> report_errors_tg
     return report_errors_tg
 
 verify_monthly_indices_dag()
