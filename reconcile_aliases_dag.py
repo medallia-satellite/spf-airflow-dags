@@ -41,7 +41,7 @@ def reconcile_aliases_dag():
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     fetched = fetch_aliases(hook=hook_get)
-    grouped = group_by_index.expand(aliases=fetched)
+    grouped = group_by_index(aliases=fetched)
     return push(filter_errors(check_indices_with_3_aliases.expand(aliases=grouped)))
 
 reconcile_aliases_dag()
