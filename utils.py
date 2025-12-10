@@ -67,8 +67,8 @@ def report_errors(stages):
     ti = context["ti"]
     for stage in stages:
         errors = ti.xcom_pull(task_ids=f"{stage}.filter_errors", key="errors")
-        print(f"Errors found in stage {stage}: {len(errors)}")
-        print(json.dumps(errors, indent=2))
+        print(f"Errors in '{stage}' stage: {len(errors)}")
+        print(json.dumps({e["key"]: e["error"] for e in errors}, indent=2))
     return
 
 @task(task_id="push")
