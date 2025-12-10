@@ -9,7 +9,7 @@ BASE_REGEX = re.compile(BASE_PATTERN)
 INDEX_PATTERN = rf"^seaas-{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
 INDEX_REGEX = re.compile(INDEX_PATTERN)
 
-def monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[Tuple[str, str]]:
+def generate_monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[Tuple[str, str]]:
     current_date = start_date
     for _ in range(num_months):
         yield f"{current_date:%Y-%m-%d}", f"{alias}-{current_date:%Y-%m-%d}"

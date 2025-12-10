@@ -63,7 +63,6 @@ def verify_monthly_indices_dag():
 
         return success(key=instance, value=result)
 
-
     @task_group
     def fetch_data():
         @task
@@ -81,11 +80,10 @@ def verify_monthly_indices_dag():
         return push(grouped)
 
     @task
-    def group_aliases_by_index(data):
+    def group_aliases_by_index(data: Result):
         instance = data["key"]
-        aliases = retrieve("fetch_data", instance)
         result = defaultdict(list)
-        for alias_entry in aliases:
+        for alias_entry in retrieve("fetch_data", instance):
             result[alias_entry["index"]].append(alias_entry["alias"])
         return success(key=instance, value=dict(result))
 
@@ -98,47 +96,46 @@ def verify_monthly_indices_dag():
             return success(key=data["key"], value="")
 
     @task_group
-    def missing_aliases(data):
+    def aliases(data: List[Result]):
         grouped = group_aliases_by_index.expand(data=data)
         r = check_indices_with_3_aliases.expand(data=grouped)
         return push(filter_errors(r))
 
     @task_group
-    def lifecycle_settings(data):
+    def lifecycle_settings(data: List[Result]):
         f = fetch_alias_settings.partial(hook=hook_get).expand(data=data)
         e = extract_ilm_setting.expand(data=f)
         return push(filter_errors(e))
 
     @task_group
-    def mappings(data):
+    def mappings(data: List[Result]):
         f = fetch_alias_mappings.partial(hook=hook_get).expand(data=data)
         e = extract_mapping.expand(data=f)
         return push(filter_errors(e))
 
-
     @task
-    def identify_missing_months(data):
+    def identify_missing_months(data: Result):
         instance = data["key"]
-        aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
+        instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
         num_months = retrieve("lifecycle_settings", instance)["retention"]
 
         today = datetime.date.today()
         start_date = today.replace(day=1) + relativedelta(months=1)
 
         missing = []
-        for month, monthly_alias in monthly_aliases(instance, start_date, num_months):
-            if monthly_alias not in aliases:
+        for month, monthly_alias in generate_monthly_aliases(instance, start_date, num_months):
+            if monthly_alias not in instance_aliases:
                 missing.append(month)
 
         return success(key=instance, value=missing)
 
     @task_group
-    def missing_months(data):
+    def monthly_aliases(data: List[Result]):
         m = identify_missing_months.expand(data=data)
         filtered = filter_empty(m)
         return push(filter_errors(filtered))
 
-    mm = missing_months(lifecycle_settings(data=mappings(data=missing_aliases(data=fetch_data()))))
+    mm = monthly_aliases(data=lifecycle_settings(data=mappings(data=aliases(data=fetch_data()))))
     rr = report_errors(stages=["missing_aliases", "mappings", "lifecycle_settings", "missing_months"])
     mm >> rr
     return rr

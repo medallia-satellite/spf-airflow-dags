@@ -27,7 +27,7 @@ def fnv():
         if not all(m == sample for m in _mappings):
             return failure(key=data["key"], error=f"different mappings {_mappings}")
 
-        if sample != default_index_mappings():
+        if sample["mappings"] != default_index_mappings():
             return failure(key=data["key"], error=f"invalid mapping {sample}")
 
         return success(key=data["key"], value=sample)
@@ -165,7 +165,7 @@ def fnv():
         start_date = today.replace(day=1) + relativedelta(months=1)
 
         missing = []
-        for month, monthly_alias in monthly_aliases(instance, start_date, num_months):
+        for month, monthly_alias in generate_monthly_aliases(instance, start_date, num_months):
             if monthly_alias not in aliases:
                 missing.append(month)
 

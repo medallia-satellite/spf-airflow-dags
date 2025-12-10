@@ -1,6 +1,6 @@
 import functools
 import json
-from typing import TypedDict, Optional, Any
+from typing import TypedDict, Optional, Any, List
 
 from airflow.decorators import task
 from airflow.operators.python import get_current_context
@@ -39,30 +39,34 @@ def chain_on_success(func):
     return wrapper
 
 @task
-def filter_errors(data):
+def filter_empty(data: List[Result]):
+    results = [d for d in data if d["success"] and d["value"]]
+    print(f"Filtering {len(data) - len(results)} empty successes.")
+    return results
+
+@task
+def filter_errors(data: List[Result]):
+    errors = [d for d in data if not d["success"]]
+    for e in errors:
+        print(f"Error: {e['key']} - {e['value']}")
+
     context = get_current_context()
     ti = context["ti"]
-    ti.xcom_push("errors",[d for d in data if not d["success"]])
+    ti.xcom_push("errors", errors)
 
     results = [d for d in data if d["success"]]
     print(f"Collected {len(results)} successes.")
     return results
 
 @task
-def filter_empty(data):
-    results = [d for d in data if d["success"] and d["value"]]
-    print(f"Filtering {len(data) - len(results)} empty successes.")
-    return results
-
-@task
-def print_errors(data):
+def print_errors(data: List[Result]):
     results = {d['key']: d['error'] for d in data if not d["success"]}
     print(f"Errors found: {len(results)}")
     print(json.dumps(results, indent=2))
     return results
 
 @task
-def report_errors(stages):
+def report_errors(stages: List[str]):
     context = get_current_context()
     ti = context["ti"]
     for stage in stages:
@@ -72,7 +76,7 @@ def report_errors(stages):
     return
 
 @task(task_id="push")
-def push(data):
+def push(data: List[Result]):
     context = get_current_context()
     ti = context["ti"]
     for d in data:
@@ -82,7 +86,7 @@ def push(data):
     return [success(key=d["key"], value=None) for d in data if d["success"]]
 
 
-def retrieve(stage, key):
+def retrieve(stage: str, key: str):
     context = get_current_context()
     ti = context["ti"]
     return ti.xcom_pull(task_ids=f"{stage}.push", key=key)
