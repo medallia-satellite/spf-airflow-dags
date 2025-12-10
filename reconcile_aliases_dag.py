@@ -27,7 +27,7 @@ def reconcile_aliases_dag():
             if not any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
                 continue
             result[index].append(alias)
-        return [success(key=k, value=v) for k, v in result.items() if len(v) < 3]
+        return [success(key=k, value=v) for k, v in result.items()]
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     fetched = fetch_aliases(hook=hook_get)
