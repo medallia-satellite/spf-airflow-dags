@@ -5,7 +5,7 @@ from airflow.decorators import task
 from airflow.providers.http.hooks.http import HttpHook
 
 from repo.fix_and_verify import *
-from repo.utils import success
+from repo.utils import *
 
 
 @task
