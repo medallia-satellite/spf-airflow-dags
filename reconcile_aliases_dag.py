@@ -34,7 +34,7 @@ def reconcile_aliases_dag():
     def check_indices_with_3_aliases(aliases: Result):
         aliases = aliases
         if len(aliases["value"]) < 3 :
-            return failure(key=aliases["key"], error=f"Too few aliases: {aliases["value"]}")
+            return failure(key=aliases["key"], error=f"Too few aliases: {aliases['value']}")
         else:
             return success(key=aliases["key"], value="")
 
