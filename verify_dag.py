@@ -132,7 +132,8 @@ def verify_monthly_indices_dag():
         @task
         def aliases_in_retention(expected_aliases: Result):
             instance = expected_aliases["key"]
-            instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
+            instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)
+                                if ALIAS_REGEX_MAPPING["write"].match(alias['alias'])]
 
             if missing := [alias for alias in expected_aliases["value"] if alias not in instance_aliases]:
                 return failure(key=instance, error=f"Missing aliases {missing=}")
@@ -148,7 +149,8 @@ def verify_monthly_indices_dag():
         @task
         def filter_expired(expected_aliases: Result):
             instance = expected_aliases["key"]
-            instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)]
+            instance_aliases = [alias['alias'] for alias in retrieve("fetch_data", instance)
+                                if ALIAS_REGEX_MAPPING["write"].match(alias['alias'])]
             if expired := [alias for alias in instance_aliases if alias not in expected_aliases["value"]]:
                 return failure(key=instance, error=f"Expired aliases {expired=}")
             return success(key=instance, value="")
