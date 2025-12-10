@@ -164,7 +164,7 @@ def verify_monthly_indices_dag():
     monthly_aliases_tg = monthly_aliases(lifecycle_settings_tg)
     expired_aliases_tg = expired_aliases(lifecycle_settings_tg)
 
-    report_errors_tg = report_errors(stages=["aliases", "mappings", "ilm_settings", "monthly_aliases"])
+    report_errors_tg = report_errors(stages=["aliases", "mappings", "ilm_settings", "monthly_aliases", "expired_aliases"])
     [aliases_tg, mappings_tg, monthly_aliases_tg, expired_aliases_tg] >> report_errors_tg
     return report_errors_tg
 
