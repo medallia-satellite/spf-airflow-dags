@@ -15,8 +15,8 @@ class Result(TypedDict):
 def success(key: str, value: Any) -> Result:
     return Result(success=True, key=key, error=None, value=value)
 
-def failure(key: str, error: str) -> Result:
-    return Result(success=False, key=key, error=error, value=None)
+def failure(key: str, error: str, value: Any = None) -> Result:
+    return Result(success=False, key=key, error=error, value=value)
 
 def chain_on_success(func):
     """

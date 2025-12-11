@@ -92,34 +92,47 @@ def wip_dag():
             for i in range(num_months)
         ]
 
-    def aaaaaa(index: str) -> bool:
-        aliases = retrieve("fetch_and_group_aliases", index)
-        return all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases])
-
     @task
     def check_monthly_indices(data: Result):
         tenant = data["key"]
         indices = retrieve("fetch_and_group_indices", tenant)
-        result = []
+        results = []
 
         for monthly_alias in expected_monthly_aliases(tenant):
             monthly_indices = [index for index in indices if monthly_alias in index]
             if not monthly_indices:
-                result.append(failure(key=tenant, error=f"Missing index: {monthly_alias}"))
+                results.append(failure(key=tenant, value=monthly_alias, error="Missing index"))
                 continue
             if len(monthly_indices) != 1:
-                result.append(failure(key=tenant, error=f"Monthly index not unique: {monthly_indices}"))
+                results.append(failure(key=tenant, value=monthly_alias, error=f"Monthly index not unique"))
                 continue
-            if not aaaaaa(monthly_indices[0]):
-                result.append(failure(key=tenant, error="alias"))
+            index = monthly_indices[0]
+            aliases = retrieve("fetch_and_group_aliases", index)
+            if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases]):
+                results.append(failure(key=tenant, value=index, error="Alias not complete"))
                 continue
-            result.append(success(key=tenant, value=monthly_indices[0]))
 
-        return result
+            results.append(success(key=tenant, value=index))
+
+        print(f"OK monthly indices: {len([r for r in results if r['success']])}/{len(results)}")
+        print(f"Missing monthly indices: {len([r for r in results if r['error'] == 'Missing index'])}/{len(results)}")
+        print(f"Indices with missing aliases: {len([r for r in results if r['error'] == 'Alias not complete'])}/{len(results)}")
+        print(f"Non unique monthly indices: {len([r for r in results if r['error'] == 'Monthly index not unique'])}/{len(results)}")
+
+        return results
 
     @task
     def assign_missing_aliases(data: Result):
-        if not data["success"] and data["error"] != "alias":
+        if data["success"] or data["error"] != "Alias not complete":
+            return data
+        print(f"Assigning missing aliases to tenant: {data['key']}")
+
+        return data
+
+
+    @task
+    def assign_missing_aliases(data: Result):
+        if data["success"] or data["error"] != "alias":
             return data
 
 
