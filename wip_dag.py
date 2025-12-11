@@ -57,7 +57,7 @@ def wip_dag():
         def group_by_tenant(indices: list):
             result = defaultdict(list)
             for index in indices:
-                result[BASE_REGEX.match(index).group(0)].append(index)
+                result[BASE_REGEX.search(index).group(0)].append(index)
             return [success(key=k, value=v) for k, v in result.items()]
 
         fetched = fetch_indices(hook=hook_get)
