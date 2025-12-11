@@ -130,8 +130,10 @@ def wip_dag():
     def reconcile(data: List[Result]):
         return push(check_monthly_indices.expand(data=data))
 
-    (fetch_and_group_aliases() >>
-     reconcile(ilm_settings(fetch_and_group_indices())) >>
-     report_errors(stages=["ilm_settings", "reconcile"]))
+    fga = fetch_and_group_aliases()
+    fgi = fetch_and_group_indices()
+    r = reconcile(ilm_settings(fgi))
+    ree = report_errors(stages=["ilm_settings", "reconcile"])
+    [fga, fgi] >> r >> ree
 
 wip_dag()
