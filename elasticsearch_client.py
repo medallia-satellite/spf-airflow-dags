@@ -73,3 +73,40 @@ def add_aliases(hook: HttpHook, actions: Result):
     )
     hook.check_response(response)
     return response.json()
+
+
+@task
+def reconcile_aliases(hook: HttpHook, data: Result):
+    index = data["key"]
+    aliases = generate_aliases(index)
+    actions = [
+        {
+            "add": {
+                "index": index,
+                "alias": aliases["read"],
+                "is_write_index": False,
+            }
+        },
+        {
+            "add": {
+                "index": index,
+                "alias": aliases["write"],
+                "is_write_index": True,
+            }
+        },
+        {
+            "add": {
+                "index": index,
+                "alias": aliases["rollover"],
+                "is_write_index": False,
+            }
+        },
+
+    ]
+    response = hook.run(
+        endpoint=f'/_aliases',
+        headers={'Content-Type': 'application/json'},
+        data=json.dumps({"actions": actions["value"]})
+    )
+    hook.check_response(response)
+    return response.json()

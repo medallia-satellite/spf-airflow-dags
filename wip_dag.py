@@ -52,7 +52,7 @@ def wip_dag():
         return success(key=instance, value=result)
 
     @task_group
-    def fetch_data():
+    def fetch_and_group_indices():
         @task
         def group_by_tenant(indices: list):
             result = defaultdict(list)
@@ -62,6 +62,19 @@ def wip_dag():
 
         fetched = fetch_indices(hook=hook_get)
         grouped = group_by_tenant(fetched)
+        return push(grouped)
+
+    @task_group
+    def fetch_and_group_aliases():
+        @task
+        def group_by_index(aliases: list):
+            result = defaultdict(list)
+            for alias_entry in aliases:
+                result[INDEX_REGEX.match(alias_entry["index"]).group(0)].append(alias_entry["alias"])
+            return [success(key=k, value=v) for k, v in result.items()]
+
+        fetched = fetch_aliases(hook=hook_get)
+        grouped = group_by_index(fetched)
         return push(grouped)
 
     @task_group
@@ -78,29 +91,46 @@ def wip_dag():
             for i in range(num_months)
         ]
 
+    def aaaaaa(index: str) -> bool:
+        aliases = retrieve("fetch_and_group_aliases", index)
+        return all(any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases)
+
     @task
-    def aaaa(data: Result):
+    def check_monthly_indices(data: Result):
         tenant = data["key"]
-        indices = retrieve("fetch_data", tenant)
+        indices = retrieve("fetch_and_group_indices", tenant)
         result = []
-        print(indices)
+
         for monthly_alias in expected_monthly_aliases(tenant):
-            print(f"looking for {monthly_alias}")
-            if any(monthly_alias in index for index in indices):
-                result.append(monthly_alias)
-        return success(key=tenant, value=result)
+            monthly_indices = [index for index in indices if monthly_alias in index]
+            if not monthly_indices:
+                result.append(failure(key=tenant, error=f"Missing index: {monthly_alias}"))
+                continue
+            if len(monthly_indices) != 1:
+                result.append(failure(key=tenant, error=f"Monthly index not unique: {monthly_indices}"))
+                continue
+            if not aaaaaa(monthly_indices[0]):
+                result.append(failure(key=tenant, error="alias"))
+                continue
+            result.append(success(key=tenant, value=monthly_indices[0]))
+
+        return result
+
+    @task
+    def assign_missing_aliases(data: Result):
+        if not data["success"] and data["error"] != "alias":
+            return data
+
+
+        return data
 
 
     @task_group
     def reconcile(data: List[Result]):
-        return push(aaaa.expand(data=data))
+        return push(check_monthly_indices.expand(data=data))
 
-    fetch_data_tg = fetch_data()
-    ilm_settings_tg = ilm_settings(fetch_data_tg)
-    reconcile_tg = reconcile(ilm_settings_tg)
-    report_errors_tg = report_errors(stages=["ilm_settings", "reconcile"])
-
-    [reconcile_tg] >> report_errors_tg
-    return report_errors_tg
+    (fetch_and_group_aliases() >>
+     reconcile(ilm_settings(fetch_and_group_indices())) >>
+     report_errors(stages=["ilm_settings", "reconcile"]))
 
 wip_dag()
