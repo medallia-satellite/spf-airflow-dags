@@ -70,7 +70,8 @@ def wip_dag():
         def group_by_index(aliases: list):
             result = defaultdict(list)
             for alias_entry in aliases:
-                result[INDEX_REGEX.match(alias_entry["index"]).group(0)].append(alias_entry["alias"])
+                if match := INDEX_REGEX.match(alias_entry["index"]):
+                    result[match.group(0)].append(alias_entry["alias"])
             return [success(key=k, value=v) for k, v in result.items()]
 
         fetched = fetch_aliases(hook=hook_get)
