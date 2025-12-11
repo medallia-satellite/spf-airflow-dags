@@ -128,7 +128,8 @@ def wip_dag():
 
     @task_group
     def reconcile(data: List[Result]):
-        return push(check_monthly_indices.expand(data=data).flatten())
+        expanded = check_monthly_indices.expand(data=data)
+        return push(expanded.flatten())
 
     fga = fetch_and_group_aliases()
     fgi = fetch_and_group_indices()
