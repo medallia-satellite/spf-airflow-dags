@@ -49,11 +49,6 @@ def filter_errors(data: List[Result]):
     errors = [d for d in data if not d["success"]]
     for e in errors:
         print(f"Error: {e['key']} - {e['value']}")
-
-    context = get_current_context()
-    ti = context["ti"]
-    ti.xcom_push("errors", errors)
-
     results = [d for d in data if d["success"]]
     print(f"Collected {len(results)} successes.")
     return results
@@ -67,10 +62,8 @@ def print_errors(data: List[Result]):
 
 @task
 def report_errors(stages: List[str]):
-    context = get_current_context()
-    ti = context["ti"]
     for stage in stages:
-        errors = ti.xcom_pull(task_ids=f"{stage}.filter_errors", key="errors")
+        errors = retrieve(stage, "errors")
         print(f"Errors in '{stage}' stage: {len(errors)}")
         print(json.dumps({e["key"]: e["error"] for e in errors}, indent=2))
     return
@@ -79,10 +72,16 @@ def report_errors(stages: List[str]):
 def push(data: List[Result]):
     context = get_current_context()
     ti = context["ti"]
+
+    errors = [d for d in data if not d["success"]]
+    print(f"Errors found: {len(errors)}/{len(data)}")
+    ti.xcom_push("errors", errors)
+
     results = [d for d in data if d["success"]]
     print(f"Pushing {len(results)}/{len(data)} successes.")
     for r in results:
         ti.xcom_push(r["key"], r["value"])
+
     return [success(key=r["key"], value=None) for r in results]
 
 

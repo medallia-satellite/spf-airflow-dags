@@ -68,7 +68,7 @@ def wip_dag():
     def ilm_settings(data: List[Result]):
         f = fetch_alias_settings.partial(hook=hook_get).expand(data=data)
         e = extract_ilm_setting.expand(data=f)
-        return push(filter_errors(e))
+        return push(e)
 
     fetch_data_tg = fetch_data()
     ilm_settings_tg = ilm_settings(fetch_data_tg)
