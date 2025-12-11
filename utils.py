@@ -39,6 +39,11 @@ def chain_on_success(func):
     return wrapper
 
 @task
+def flatten_results(results: list[list[Result]]) -> list[Result]:
+    flattened = [item for sublist in results for item in sublist]
+    return flattened
+
+@task
 def filter_empty(data: List[Result]):
     results = [d for d in data if d["success"] and d["value"]]
     print(f"Filtering {len(data) - len(results)} empty successes.")
@@ -89,3 +94,4 @@ def retrieve(stage: str, key: str):
     context = get_current_context()
     ti = context["ti"]
     return ti.xcom_pull(task_ids=f"{stage}.push", key=key)
+
