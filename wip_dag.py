@@ -84,7 +84,9 @@ def wip_dag():
         tenant = data["key"]
         indices = retrieve("fetch_data", tenant)
         result = []
+        print(indices)
         for monthly_alias in expected_monthly_aliases(tenant):
+            print(f"looking for {monthly_alias}")
             if any(monthly_alias in index for index in indices):
                 result.append(monthly_alias)
         return success(key=tenant, value=result)
