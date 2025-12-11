@@ -73,11 +73,10 @@ def wip_dag():
     def expected_monthly_aliases(tenant):
         num_months = retrieve("ilm_settings", tenant)["retention"]
         start_date = datetime.date.today().replace(day=1) + relativedelta(months=1)
-        result = [
+        return [
             f"{tenant}-{(start_date - relativedelta(months=i)):%Y-%m-%d}"
             for i in range(num_months)
         ]
-        return success(key=tenant, value=result)
 
     @task
     def aaaa(data: Result):
