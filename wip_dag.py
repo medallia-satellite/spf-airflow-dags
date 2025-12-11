@@ -70,12 +70,36 @@ def wip_dag():
         e = extract_ilm_setting.expand(data=f)
         return push(e)
 
+    def expected_monthly_aliases(tenant):
+        num_months = retrieve("ilm_settings", tenant)["retention"]
+        start_date = datetime.date.today().replace(day=1) + relativedelta(months=1)
+        result = [
+            f"{tenant}-{(start_date - relativedelta(months=i)):%Y-%m-%d}"
+            for i in range(num_months)
+        ]
+        return success(key=tenant, value=result)
+
+    @task
+    def aaaa(data: Result):
+        tenant = data["key"]
+        indices = retrieve("fetch_data", tenant)
+        result = []
+        for monthly_alias in expected_monthly_aliases(tenant):
+            if any(monthly_alias in index for index in indices):
+                result.append(monthly_alias)
+        return success(key=tenant, value=result)
+
+
+    @task_group
+    def reconcile(data: List[Result]):
+        return push(aaaa.expand(data=data))
+
     fetch_data_tg = fetch_data()
     ilm_settings_tg = ilm_settings(fetch_data_tg)
+    reconcile(ilm_settings_tg)
+    report_errors_tg = report_errors(stages=["ilm_settings", "reconcile"])
 
-    report_errors_tg = report_errors(stages=["ilm_settings"])
-
-    [ilm_settings_tg] >> report_errors_tg
+    [reconcile] >> report_errors_tg
     return report_errors_tg
 
 wip_dag()
