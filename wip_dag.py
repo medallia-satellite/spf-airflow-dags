@@ -146,7 +146,7 @@ def wip_dag():
 
     fga = fetch_and_group_aliases()
     fgi = fetch_and_group_indices()
-    fgi >> fga
+    fgi << fga
     ilm = ilm_settings(fgi)
     rec = reconcile(ilm)
     ilm >> rec
