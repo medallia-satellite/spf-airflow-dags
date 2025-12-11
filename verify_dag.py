@@ -66,9 +66,9 @@ def verify_monthly_indices_dag():
     @task_group
     def fetch_data():
         @task
-        def group_by_tenant(aliases: list):
+        def group_by_tenant(data: list):
             result = defaultdict(list)
-            for alias_entry in aliases:
+            for alias_entry in data:
                 alias = alias_entry["alias"]
                 if not any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()):
                     continue
