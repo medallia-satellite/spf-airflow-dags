@@ -79,11 +79,11 @@ def report_errors(stages: List[str]):
 def push(data: List[Result]):
     context = get_current_context()
     ti = context["ti"]
-    for d in data:
-        if d["success"]:
-            ti.xcom_push(d["key"], d["value"])
-
-    return [success(key=d["key"], value=None) for d in data if d["success"]]
+    results = [d for d in data if d["success"]]
+    print(f"Pushing {len(results)}/{len(data)} successes.")
+    for r in results:
+        ti.xcom_push(r["key"], r["value"])
+    return [success(key=r["key"], value=None) for r in results]
 
 
 def retrieve(stage: str, key: str):
