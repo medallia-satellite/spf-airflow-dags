@@ -94,7 +94,7 @@ def wip_dag():
 
     def aaaaaa(index: str) -> bool:
         aliases = retrieve("fetch_and_group_aliases", index)
-        return all(any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases)
+        return all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases])
 
     @task
     def check_monthly_indices(data: Result):
@@ -132,8 +132,8 @@ def wip_dag():
 
     fga = fetch_and_group_aliases()
     fgi = fetch_and_group_indices()
-    r = reconcile(ilm_settings(fgi))
-    ree = report_errors(stages=["ilm_settings", "reconcile"])
-    [fga, fgi] >> r >> ree
+    rec = reconcile(ilm_settings(fgi))
+    rep = report_errors(stages=["ilm_settings", "reconcile"])
+    [fga, fgi] >> rec >> rep
 
 wip_dag()
