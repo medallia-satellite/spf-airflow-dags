@@ -96,10 +96,10 @@ def wip_dag():
 
     fetch_data_tg = fetch_data()
     ilm_settings_tg = ilm_settings(fetch_data_tg)
-    reconcile(ilm_settings_tg)
+    reconcile_tg = reconcile(ilm_settings_tg)
     report_errors_tg = report_errors(stages=["ilm_settings", "reconcile"])
 
-    [reconcile] >> report_errors_tg
+    [reconcile_tg] >> report_errors_tg
     return report_errors_tg
 
 wip_dag()
