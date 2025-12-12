@@ -29,7 +29,10 @@ def condition_on_inputs(fn):
         task_id = context["task"].task_id
 
         args = ti.xcom_pull(task_ids=task_id, key="task_args") or []
+        print(args)
+
         kwargs = ti.xcom_pull(task_ids=task_id, key="task_kwargs") or {}
+        print(kwargs)
 
         return fn(*args, **kwargs)
 
