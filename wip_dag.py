@@ -18,9 +18,6 @@ from repo.utils import *
 def wip_dag():
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
-
-
-
     @task_group
     def fetch_and_group_indices():
         @task
@@ -111,16 +108,18 @@ def wip_dag():
                                                        'type': 'nested'},
                                           'responseDate': {'type': 'date'},
                                           'surveyId': {'type': 'long'}}},
-              'settings': {'analysis': {'analyzer': {'topic-builder-analyzer': {'filter': ['compound_capture'],
+              'settings': {'index': {'analysis': {'analyzer': {'topic-builder-analyzer': {'filter': ['compound_capture'],
                                                                                 'tokenizer': 'whitespace',
                                                                                 'type': 'custom'}},
                                         'filter': {'compound_capture': {'patterns': ['(!?[^@!@]+)@!@'],
                                                                         'preserve_original': 'false',
                                                                         'type': 'pattern_capture'}}},
-                           'index.lifecycle.name': f'M{num_months}_rollover',
-                           'index.lifecycle.rollover_alias': f'{tenant}-rollover',
-                           'number_of_replicas': 1,
-                           'number_of_shards': 1}}}
+                            'lifecycle': {
+                                'name': f'M{num_months}_rollover',
+                                'rollover_alias': f'{tenant}-rollover',
+                            },
+                           'number_of_replicas': '1',
+                           'number_of_shards': 1}}}}
             if index_template != ref:
                 return failure(key=tenant, error=f"Invalid template: {index_template}")
             return success(key=tenant, value="")
