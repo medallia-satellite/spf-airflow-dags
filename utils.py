@@ -26,8 +26,8 @@ def condition_on_inputs(fn):
     def _run_if(context):
         print(context.__dict__)
         ti = context["ti"]
-        task_id = context["task"].task_id
-
+        task_id = context["task"].task_instance_key_str
+        print(task_id)
         args = ti.xcom_pull(task_ids=task_id, key="task_args") or []
         print(args)
 
