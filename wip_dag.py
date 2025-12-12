@@ -132,25 +132,33 @@ def wip_dag():
 
         return results
 
+    @task_group
+    def missing_monthly_indices(upstream: List[Result]):
+        @task
+        def extract_missing_monthly_indices(data: list[Result]):
+            return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Missing index"]
 
-    @task
-    def extract_indices_with_missing_aliases(data: list[Result]):
-        return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Alias not complete"]
+        @task
+        def create_missing_monthly_indices(data: Result):
+            return data
 
-
-    @task
-    def extract_missing_monthly_indices(data: list[Result]):
-        return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Missing index"]
-
-
-    @task
-    def assign_missing_aliases_to_indices(data: Result):
-        return data
+        extracted = extract_missing_monthly_indices.expand(data=upstream)
+        return create_missing_monthly_indices.expand(data=extracted)
 
 
-    @task
-    def create_missing_monthly_indices(data: Result):
-        return data
+    @task_group
+    def indices_with_missing_aliases(upstream: Result):
+        @task
+        def extract_indices_with_missing_aliases(data: list[Result]):
+            return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Alias not complete"]
+
+        @task
+        def assign_missing_aliases_to_indices(data: Result):
+            return data
+
+        extracted = extract_indices_with_missing_aliases.expand(data=upstream)
+        return assign_missing_aliases_to_indices.expand(data=extracted)
+
 
     fga = fetch_and_group_aliases()
     fgi = fetch_and_group_indices()
@@ -158,7 +166,9 @@ def wip_dag():
     fga.set_downstream(ilm)
 
     validated = validate_monthly_indices(ilm)
-    assign_missing_aliases_to_indices.expand(data=extract_indices_with_missing_aliases(validated))
-    create_missing_monthly_indices.expand(data=extract_missing_monthly_indices(validated))
+
+    indices_with_missing_aliases(validated)
+    missing_monthly_indices(validated)
+
 
 wip_dag()
