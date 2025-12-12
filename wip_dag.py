@@ -151,7 +151,7 @@ def wip_dag():
         flattened = flatten_results(expanded)
         ama = assign_missing_aliases.expand(data=needs_aliases(flattened))
         cmi = create_missing_indices.expand(data=needs_indices(flattened))
-        return push(ama.concat(cmi))
+        return push(cmi.concat(ama))
 
 
     fga = fetch_and_group_aliases()
