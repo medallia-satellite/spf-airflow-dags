@@ -125,7 +125,7 @@ def wip_dag():
 
         return results
 
-    @task
+    @task.run_if(lambda ctx: not ctx["data"]["error"] == "Alias not complete")
     def assign_missing_aliases(data: Result):
 
         if data["success"] or data["error"] != "Alias not complete":
@@ -134,20 +134,11 @@ def wip_dag():
 
         return data
 
-
-    @task
-    def assign_missing_aliases(data: Result):
-        if data["success"] or data["error"] != "alias":
-            return data
-
-
-        return data
-
-
     @task_group
     def reconcile(data: List[Result]):
         expanded = aaaaaaa_monthly_indices.expand(data=data)
-        return push(flatten_results(expanded))
+        return push(assign_missing_aliases(flatten_results(expanded)))
+
 
     fga = fetch_and_group_aliases()
     fgi = fetch_and_group_indices()
