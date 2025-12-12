@@ -119,7 +119,7 @@ def wip_dag():
                                 'rollover_alias': f'{tenant}-rollover',
                             },
                            'number_of_replicas': '1',
-                           'number_of_shards': 1}}}}
+                           'number_of_shards': '1'}}}}
             _ = index_template.pop("composed_of")
             if index_template != ref:
                 return failure(key=tenant, error=f"Invalid template: {index_template}")
