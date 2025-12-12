@@ -93,7 +93,11 @@ def wip_dag():
         ]
 
     @task
-    def check_monthly_indices(data: Result):
+    def aaaaaaa_monthly_indices(data: Result):
+
+        context = get_current_context()
+        print(context.__dict__)
+        print(context)
         tenant = data["key"]
         indices = retrieve("fetch_and_group_indices", tenant)
         results = []
@@ -123,6 +127,7 @@ def wip_dag():
 
     @task
     def assign_missing_aliases(data: Result):
+
         if data["success"] or data["error"] != "Alias not complete":
             return data
         print(f"Assigning missing aliases to tenant: {data['key']}")
@@ -141,7 +146,7 @@ def wip_dag():
 
     @task_group
     def reconcile(data: List[Result]):
-        expanded = check_monthly_indices.expand(data=data)
+        expanded = aaaaaaa_monthly_indices.expand(data=data)
         return push(flatten_results(expanded))
 
     fga = fetch_and_group_aliases()
