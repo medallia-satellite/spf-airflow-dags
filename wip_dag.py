@@ -97,7 +97,7 @@ def wip_dag():
 
         context = get_current_context()
         print(context.__dict__)
-        print(context)
+        print(context["data"]["key"])
         tenant = data["key"]
         indices = retrieve("fetch_and_group_indices", tenant)
         results = []
