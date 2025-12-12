@@ -138,7 +138,7 @@ def wip_dag():
     @task_group
     def reconcile(data: List[Result]):
         expanded = aaaaaaa_monthly_indices.expand(data=data)
-        return push(assign_missing_aliases(flatten_results(expanded)))
+        return push(assign_missing_aliases.expand(data=flatten_results(expanded)))
 
 
     fga = fetch_and_group_aliases()
