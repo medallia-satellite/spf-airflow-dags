@@ -95,12 +95,34 @@ def wip_dag():
             num_months = retrieve("ilm_settings", tenant)["retention"]
             # get
             index_template = data["value"]["index_template"]
-            index_patterns = index_template["index_patterns"]
-            if f"seaas-{tenant}-*" not in index_patterns:
-                return failure(key=tenant, error=f"Invalid patterns: {index_patterns}")
-            template = index_template["template"]
-            if template != generate_index_template(tenant, num_months):
-                return failure(key=tenant, error=f"Invalid template: {template}")
+            ref = {'index_patterns': [f'seaas-{tenant}-*'],
+ 'template': {'mappings': {'properties': {'comments': {'properties': {'language': {'type': 'keyword'},
+                                                                      'linguisticConnections': {'analyzer': 'topic-builder-analyzer',
+                                                                                                'position_increment_gap': 1000,
+                                                                                                'type': 'text'},
+                                                                      'linguisticConnectionsIndexes': {'type': 'short'},
+                                                                      'name': {'type': 'keyword'},
+                                                                      'persona': {'type': 'keyword'},
+                                                                      'sentenceContent': {'analyzer': 'topic-builder-analyzer',
+                                                                                          'type': 'text'},
+                                                                      'sentenceIndex': {'type': 'short'},
+                                                                      'wordEndIndexes': {'type': 'integer'},
+                                                                      'wordStartIndexes': {'type': 'integer'}},
+                                                       'type': 'nested'},
+                                          'responseDate': {'type': 'date'},
+                                          'surveyId': {'type': 'long'}}},
+              'settings': {'analysis': {'analyzer': {'topic-builder-analyzer': {'filter': ['compound_capture'],
+                                                                                'tokenizer': 'whitespace',
+                                                                                'type': 'custom'}},
+                                        'filter': {'compound_capture': {'patterns': ['(!?[^@!@]+)@!@'],
+                                                                        'preserve_original': 'false',
+                                                                        'type': 'pattern_capture'}}},
+                           'index.lifecycle.name': f'M{num_months}_rollover',
+                           'index.lifecycle.rollover_alias': f'{tenant}-rollover',
+                           'number_of_replicas': 1,
+                           'number_of_shards': 1}}}
+            if index_template != ref:
+                return failure(key=tenant, error=f"Invalid template: {index_template}")
             return success(key=tenant, value="")
 
         f = fetch_index_templates.partial(hook=hook_get).expand(data=upstream)
