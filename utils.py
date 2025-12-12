@@ -18,6 +18,22 @@ def success(key: str, value: Any) -> Result:
 def failure(key: str, error: str, value: Any = None) -> Result:
     return Result(success=False, key=key, error=error, value=value)
 
+def condition_on_inputs(fn):
+    """
+    Wraps a user condition so it receives the task's inputs
+    instead of Airflow context.
+    """
+    def _run_if(context):
+        ti = context["ti"]
+        task_id = context["task"].task_id
+
+        args = ti.xcom_pull(task_ids=task_id, key="task_args") or []
+        kwargs = ti.xcom_pull(task_ids=task_id, key="task_kwargs") or {}
+
+        return fn(*args, **kwargs)
+
+    return _run_if
+
 def chain_on_success(func):
     """
     Decorator for functional pipelines.
