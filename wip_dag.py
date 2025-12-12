@@ -92,8 +92,19 @@ def wip_dag():
             for i in range(num_months)
         ]
 
+    @task_group
+    def validate_monthly_indices(data: List[Result]):
+        @task
+        def flatten_results(results: List[List[Result]]) -> List[Result]:
+            flattened = [item for sublist in results for item in sublist]
+            print(f"Flattened result size: {len(flattened)}")
+            return
+
+        expanded = validate_tenant_monthly_indices.expand(data=data)
+        return flatten_results(results=expanded)
+
     @task
-    def aaaaaaa_monthly_indices(data: Result):
+    def validate_tenant_monthly_indices(data: Result) -> List[Result]:
         tenant = data["key"]
         indices = retrieve("fetch_and_group_indices", tenant)
         results = []
@@ -123,34 +134,31 @@ def wip_dag():
 
 
     @task
-    def needs_aliases(data: list[Result]):
+    def extract_indices_with_missing_aliases(data: list[Result]):
         return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Alias not complete"]
 
 
     @task
-    def needs_indices(data: list[Result]):
+    def extract_missing_monthly_indices(data: list[Result]):
         return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Missing index"]
 
 
     @task
-    def assign_missing_aliases(data: Result):
+    def assign_missing_aliases_to_indices(data: Result):
         return data
 
 
     @task
-    def create_missing_indices(data: Result):
+    def create_missing_monthly_indices(data: Result):
         return data
-
-
 
     fga = fetch_and_group_aliases()
     fgi = fetch_and_group_indices()
     ilm = ilm_settings(fgi)
-    ilm.set_upstream(fga)
+    fga.set_downstream(ilm)
 
-    expanded = aaaaaaa_monthly_indices.expand(data=ilm)
-    flattened = flatten_results(expanded)
-    ama = assign_missing_aliases.expand(data=needs_aliases(flattened))
-    cmi = create_missing_indices.expand(data=needs_indices(flattened))
+    validated = validate_monthly_indices(ilm)
+    assign_missing_aliases_to_indices.expand(data=extract_indices_with_missing_aliases(validated))
+    create_missing_monthly_indices.expand(data=extract_missing_monthly_indices(validated))
 
 wip_dag()

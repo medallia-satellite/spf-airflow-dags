@@ -8,7 +8,7 @@ from repo.fix_and_verify import *
 from repo.utils import *
 
 
-@task
+@task(task_id="fetch")
 def fetch_aliases(hook: HttpHook):
     response = hook.run(
         endpoint='/_cat/aliases?h=alias,index,is_write_index',
@@ -18,7 +18,7 @@ def fetch_aliases(hook: HttpHook):
     return [r for r in response.json() if BASE_REGEX.match(r["alias"])]
 
 
-@task
+@task(task_id="fetch")
 def fetch_indices(hook: HttpHook):
     response = hook.run(
         endpoint='/_cat/indices?h=index&format=json',
