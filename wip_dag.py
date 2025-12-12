@@ -18,38 +18,8 @@ from repo.utils import *
 def wip_dag():
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
-    @task(task_id="extract")
-    @chain_on_success
-    def extract_ilm_setting(data):
-        instance = data["key"]
-        il_list = [s["settings"]["index"]["lifecycle"] for s in data["value"]]
 
-        if any("name" not in il for il in il_list):
-            return failure(key=instance, error=f"Invalid policies: {il_list}")
 
-        policies = set(il["name"] for il in il_list)
-        if not all(p in POLICY_MAPPING for p in policies):
-            return failure(key=instance, error=f"Invalid policies: {policies}")
-
-        if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-            return failure(key=instance, error=f"Retention period is not unique: {policies}")
-
-        if any("rollover_alias" not in il for il in il_list):
-            return failure(key=instance, error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
-
-        rollover_aliases = set(il["rollover_alias"] for il in il_list)
-        if not all(ALIAS_REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
-            return failure(key=instance, error=f"Invalid rollover alias {rollover_aliases}")
-
-        if len(rollover_aliases) != 1:
-            return failure(key=instance, error=f"Rollover alias is not unique {rollover_aliases}")
-
-        result = {
-            "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
-            "rollover_alias": next(iter(rollover_aliases)),
-        }
-
-        return success(key=instance, value=result)
 
     @task_group
     def fetch_and_group_indices():
@@ -79,10 +49,64 @@ def wip_dag():
         return push(grouped)
 
     @task_group
-    def ilm_settings(data: List[Result]):
-        f = fetch_alias_settings.partial(hook=hook_get).expand(data=data)
+    def ilm_settings(upstream: List[Result]):
+        @task(task_id="extract")
+        def extract_ilm_setting(data):
+            instance = data["key"]
+            il_list = [s["settings"]["index"]["lifecycle"] for s in data["value"]]
+
+            if any("name" not in il for il in il_list):
+                return failure(key=instance, error=f"Invalid policies: {il_list}")
+
+            policies = set(il["name"] for il in il_list)
+            if not all(p in POLICY_MAPPING for p in policies):
+                return failure(key=instance, error=f"Invalid policies: {policies}")
+
+            if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
+                return failure(key=instance, error=f"Retention period is not unique: {policies}")
+
+            if any("rollover_alias" not in il for il in il_list):
+                return failure(key=instance,
+                               error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
+
+            rollover_aliases = set(il["rollover_alias"] for il in il_list)
+            if not all(ALIAS_REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
+                return failure(key=instance, error=f"Invalid rollover alias {rollover_aliases}")
+
+            if len(rollover_aliases) != 1:
+                return failure(key=instance, error=f"Rollover alias is not unique {rollover_aliases}")
+
+            result = {
+                "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
+                "rollover_alias": next(iter(rollover_aliases)),
+            }
+
+            return success(key=instance, value=result)
+
+        f = fetch_alias_settings.partial(hook=hook_get).expand(data=upstream)
         e = extract_ilm_setting.expand(data=f)
         return push(e)
+
+    @task_group
+    def index_templates(upstream: List[Result]):
+        @task(task_id="extract")
+        def extract_fetch_index_template(data):
+            tenant = data["key"]
+            num_months = retrieve("ilm_settings", tenant)["retention"]
+            # get
+            index_template = data["value"]["index_template"]
+            index_patterns = index_template["index_patterns"]
+            if f"seaas-{tenant}-*" not in index_patterns:
+                return failure(key=tenant, error=f"Invalid patterns: {index_patterns}")
+            template = index_template["template"]
+            if template != generate_index_template(tenant, num_months):
+                return failure(key=tenant, error=f"Invalid template: {template}")
+            return success(key=tenant, value="")
+
+        f = fetch_index_templates.partial(hook=hook_get).expand(data=upstream)
+        e = extract_fetch_index_template.expand(data=f)
+        return push(e)
+
 
     def expected_monthly_aliases(tenant):
         num_months = retrieve("ilm_settings", tenant)["retention"]
@@ -93,7 +117,7 @@ def wip_dag():
         ]
 
     @task_group
-    def validate_monthly_indices(data: List[Result]):
+    def validate_monthly_indices_and_aliases(upstream: List[Result]):
         @task
         def flatten_results(results: List[List[Result]]) -> List[Result]:
             flattened = [item for sublist in results for item in sublist]
@@ -130,14 +154,14 @@ def wip_dag():
                 results.append(success(key=tenant, value=index))
             return results
 
-        expanded = validate_monthly_indices_per_tenant.expand(data=data)
+        expanded = validate_monthly_indices_per_tenant.expand(data=upstream)
         return flatten_results(results=expanded)
 
 
     @task_group
     def missing_monthly_indices(upstream: List[Result]):
         @task
-        def extract_missing_monthly_indices(data: list[Result]):
+        def extract_missing_monthly_indices(data: List[Result]):
             extracted = [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Missing index"]
             for r in extracted:
                 print(f"Missing monthly indices: {r['key']}/{r['value']}")
@@ -151,9 +175,9 @@ def wip_dag():
 
 
     @task_group
-    def indices_with_missing_aliases(upstream: Result):
+    def indices_with_missing_aliases(upstream: List[Result]):
         @task
-        def extract_indices_with_missing_aliases(data: list[Result]):
+        def extract_indices_with_missing_aliases(data: List[Result]):
             extracted = [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Alias not complete"]
             for r in extracted:
                 print(f"Indices with missing aliases: {r['key']}/{r['value']}")
@@ -171,7 +195,7 @@ def wip_dag():
     ilm = ilm_settings(fgi)
     fga.set_downstream(ilm)
 
-    validated = validate_monthly_indices(ilm)
+    validated = validate_monthly_indices_and_aliases(index_templates(ilm))
 
     indices_with_missing_aliases(validated)
     missing_monthly_indices(validated)

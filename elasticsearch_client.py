@@ -42,6 +42,17 @@ def fetch_alias_settings(hook: HttpHook, data: Result):
 
 
 @task(task_id="fetch")
+def fetch_index_templates(hook: HttpHook, data: Result):
+    index_template = f'{data["key"]}-rollover'
+    response = hook.run(
+        endpoint=f'/_index_template/{index_template}',
+        headers={'Accept': 'application/json'},
+    )
+    hook.check_response(response)
+    return success(key=data["key"], value=list(response.json()["index_templates"][0]))
+
+
+@task(task_id="fetch")
 def fetch_alias_mappings(hook: HttpHook, data: Result):
     alias = data["key"]
     response = hook.run(
@@ -106,7 +117,7 @@ def reconcile_aliases(hook: HttpHook, data: Result):
     response = hook.run(
         endpoint=f'/_aliases',
         headers={'Content-Type': 'application/json'},
-        data=json.dumps({"actions": actions["value"]})
+        data=json.dumps({"actions": actions})
     )
     hook.check_response(response)
     return response.json()
