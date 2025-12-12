@@ -96,7 +96,7 @@ def wip_dag():
     def aaaaaaa_monthly_indices(data: Result):
 
         context = get_current_context()
-        print(context.__dict__)
+        print(context["ti"].__dict__)
         print(context["data"]["key"])
         tenant = data["key"]
         indices = retrieve("fetch_and_group_indices", tenant)
