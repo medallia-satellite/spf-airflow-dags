@@ -144,7 +144,7 @@ def wip_dag():
         def create_missing_monthly_indices(data: Result):
             return data
 
-        extracted = extract_missing_monthly_indices.expand(data=upstream)
+        extracted = extract_missing_monthly_indices(data=upstream)
         return create_missing_monthly_indices.expand(data=extracted)
 
 
@@ -158,7 +158,7 @@ def wip_dag():
         def assign_missing_aliases_to_indices(data: Result):
             return data
 
-        extracted = extract_indices_with_missing_aliases.expand(data=upstream)
+        extracted = extract_indices_with_missing_aliases(data=upstream)
         return assign_missing_aliases_to_indices.expand(data=extracted)
 
 
