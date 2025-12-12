@@ -49,7 +49,7 @@ def fetch_index_templates(hook: HttpHook, data: Result):
         headers={'Accept': 'application/json'},
     )
     hook.check_response(response)
-    return success(key=data["key"], value=list(response.json()["index_templates"][0]))
+    return success(key=data["key"], value=response.json()["index_templates"][0])
 
 
 @task(task_id="fetch")
