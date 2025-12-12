@@ -24,6 +24,7 @@ def condition_on_inputs(fn):
     instead of Airflow context.
     """
     def _run_if(context):
+        print(context.__dict__)
         ti = context["ti"]
         task_id = context["task"].task_id
 

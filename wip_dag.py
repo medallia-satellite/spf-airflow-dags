@@ -125,7 +125,8 @@ def wip_dag():
 
         return results
 
-    @task(run_if=condition_on_inputs(lambda r: r["data"]["error"] == "Alias not complete"))
+    @task.run_if(condition_on_inputs(lambda r: r["data"]["error"] == "Alias not complete"))
+    @task
     def assign_missing_aliases(data: Result):
 
         if data["success"] or data["error"] != "Alias not complete":
