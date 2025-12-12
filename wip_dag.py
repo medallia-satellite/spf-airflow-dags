@@ -141,22 +141,16 @@ def wip_dag():
     def create_missing_indices(data: Result):
         return data
 
-    @task_group
-    def reconcile(data: List[Result]):
-        expanded = aaaaaaa_monthly_indices.expand(data=data)
-        flattened = flatten_results(expanded)
-        ama = assign_missing_aliases.expand(data=needs_aliases(flattened))
-        cmi = create_missing_indices.expand(data=needs_indices(flattened))
-        return push(cmi.concat(ama))
 
 
     fga = fetch_and_group_aliases()
     fgi = fetch_and_group_indices()
-    fgi << fga
     ilm = ilm_settings(fgi)
-    rec = reconcile(ilm)
-    ilm >> rec
-    rep = report_errors(stages=["ilm_settings", "reconcile"])
-    rec >> rep
+    ilm.set_upstream(fga)
+
+    expanded = aaaaaaa_monthly_indices.expand(data=ilm)
+    flattened = flatten_results(expanded)
+    ama = assign_missing_aliases.expand(data=needs_aliases(flattened))
+    cmi = create_missing_indices.expand(data=needs_indices(flattened))
 
 wip_dag()
