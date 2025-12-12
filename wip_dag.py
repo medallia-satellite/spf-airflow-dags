@@ -94,10 +94,6 @@ def wip_dag():
 
     @task
     def aaaaaaa_monthly_indices(data: Result):
-
-        context = get_current_context()
-        print(context["ti"].__dict__)
-        print(context["data"]["key"])
         tenant = data["key"]
         indices = retrieve("fetch_and_group_indices", tenant)
         results = []
@@ -157,7 +153,7 @@ def wip_dag():
     fga = fetch_and_group_aliases()
     fgi = fetch_and_group_indices()
     fgi << fga
-    ilm = ilm_settings(fga, data=fgi)
+    ilm = ilm_settings(fgi)
     rec = reconcile(ilm)
     ilm >> rec
     rep = report_errors(stages=["ilm_settings", "reconcile"])
