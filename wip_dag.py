@@ -98,39 +98,41 @@ def wip_dag():
         def flatten_results(results: List[List[Result]]) -> List[Result]:
             flattened = [item for sublist in results for item in sublist]
             print(f"Flattened result size: {len(flattened)}")
-            return
+            print(f"OK monthly indices: {len([r for r in flattened if r['success']])}/{len(flattened)}")
+            print(
+                f"Missing monthly indices: {len([r for r in flattened if r['error'] == 'Missing index'])}/{len(flattened)}")
+            print(
+                f"Indices with missing aliases: {len([r for r in flattened if r['error'] == 'Alias not complete'])}/{len(flattened)}")
+            print(
+                f"Non unique monthly indices: {len([r for r in flattened if r['error'] == 'Monthly index not unique'])}/{len(flattened)}")
+            return flattened
 
-        expanded = validate_tenant_monthly_indices.expand(data=data)
+        @task
+        def validate_monthly_indices_per_tenant(data: Result) -> List[Result]:
+            tenant = data["key"]
+            indices = retrieve("fetch_and_group_indices", tenant)
+            results = []
+
+            for monthly_alias in expected_monthly_aliases(tenant):
+                monthly_indices = [index for index in indices if monthly_alias in index]
+                if not monthly_indices:
+                    results.append(failure(key=tenant, value=monthly_alias, error="Missing index"))
+                    continue
+                if len(monthly_indices) != 1:
+                    results.append(failure(key=tenant, value=monthly_alias, error=f"Monthly index not unique"))
+                    continue
+                index = monthly_indices[0]
+                aliases = retrieve("fetch_and_group_aliases", index)
+                if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases]):
+                    results.append(failure(key=tenant, value=index, error="Alias not complete"))
+                    continue
+
+                results.append(success(key=tenant, value=index))
+            return results
+
+        expanded = validate_monthly_indices_per_tenant.expand(data=data)
         return flatten_results(results=expanded)
 
-    @task
-    def validate_tenant_monthly_indices(data: Result) -> List[Result]:
-        tenant = data["key"]
-        indices = retrieve("fetch_and_group_indices", tenant)
-        results = []
-
-        for monthly_alias in expected_monthly_aliases(tenant):
-            monthly_indices = [index for index in indices if monthly_alias in index]
-            if not monthly_indices:
-                results.append(failure(key=tenant, value=monthly_alias, error="Missing index"))
-                continue
-            if len(monthly_indices) != 1:
-                results.append(failure(key=tenant, value=monthly_alias, error=f"Monthly index not unique"))
-                continue
-            index = monthly_indices[0]
-            aliases = retrieve("fetch_and_group_aliases", index)
-            if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases]):
-                results.append(failure(key=tenant, value=index, error="Alias not complete"))
-                continue
-
-            results.append(success(key=tenant, value=index))
-
-        print(f"OK monthly indices: {len([r for r in results if r['success']])}/{len(results)}")
-        print(f"Missing monthly indices: {len([r for r in results if r['error'] == 'Missing index'])}/{len(results)}")
-        print(f"Indices with missing aliases: {len([r for r in results if r['error'] == 'Alias not complete'])}/{len(results)}")
-        print(f"Non unique monthly indices: {len([r for r in results if r['error'] == 'Monthly index not unique'])}/{len(results)}")
-
-        return results
 
     @task_group
     def missing_monthly_indices(upstream: List[Result]):
