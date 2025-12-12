@@ -138,28 +138,32 @@ def wip_dag():
     def missing_monthly_indices(upstream: List[Result]):
         @task
         def extract_missing_monthly_indices(data: list[Result]):
-            return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Missing index"]
+            extracted = [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Missing index"]
+            for r in extracted:
+                print(f"Missing monthly indices: {r['key']}/{r['value']}")
+            return extracted
 
         @task
         def create_missing_monthly_indices(data: Result):
             return data
 
-        extracted = extract_missing_monthly_indices(data=upstream)
-        return create_missing_monthly_indices.expand(data=extracted)
+        return create_missing_monthly_indices.expand(data=extract_missing_monthly_indices(data=upstream))
 
 
     @task_group
     def indices_with_missing_aliases(upstream: Result):
         @task
         def extract_indices_with_missing_aliases(data: list[Result]):
-            return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Alias not complete"]
+            extracted = [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Alias not complete"]
+            for r in extracted:
+                print(f"Indices with missing aliases: {r['key']}/{r['value']}")
+            return extracted
 
         @task
         def assign_missing_aliases_to_indices(data: Result):
             return data
 
-        extracted = extract_indices_with_missing_aliases(data=upstream)
-        return assign_missing_aliases_to_indices.expand(data=extracted)
+        return assign_missing_aliases_to_indices.expand(data=extract_indices_with_missing_aliases(data=upstream))
 
 
     fga = fetch_and_group_aliases()
