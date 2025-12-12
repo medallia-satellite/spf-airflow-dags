@@ -125,20 +125,33 @@ def wip_dag():
 
         return results
 
-    @task.run_if(condition_on_inputs(lambda r: r["data"]["error"] == "Alias not complete"))
+
+    @task
+    def needs_aliases(data: list[Result]):
+        return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Alias not complete"]
+
+
+    @task
+    def needs_indices(data: list[Result]):
+        return [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Missing index"]
+
+
     @task
     def assign_missing_aliases(data: Result):
+        return data
 
-        if data["success"] or data["error"] != "Alias not complete":
-            return data
-        print(f"Assigning missing aliases to tenant: {data['key']}")
 
+    @task
+    def create_missing_indices(data: Result):
         return data
 
     @task_group
     def reconcile(data: List[Result]):
         expanded = aaaaaaa_monthly_indices.expand(data=data)
-        return push(assign_missing_aliases.expand(data=flatten_results(expanded)))
+        flattened = flatten_results(expanded)
+        ama = assign_missing_aliases.expand(data=needs_aliases(flattened))
+        cmi = create_missing_indices.expand(data=needs_indices(flattened))
+        return push(ama.concat(cmi))
 
 
     fga = fetch_and_group_aliases()
