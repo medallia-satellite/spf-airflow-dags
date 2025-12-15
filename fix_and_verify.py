@@ -129,10 +129,17 @@ def generate_index_template(tenant, retention_months):
     index_pattern = f"seaas-{tenant}-*"
     index_template = {
         "index_patterns": [index_pattern],
-        "template": default_index_settings_and_mappings()
+        "template": {
+            "settings": {
+                "index": default_index_settings()
+            },
+            "mappings": default_index_mappings()
+        }
     }
-    index_template["template"]["settings"]["index.lifecycle.name"] = f"M{retention_months}_rollover"
-    index_template["template"]["settings"]["index.lifecycle.rollover_alias"] = rollover_alias
+    index_template["template"]["settings"]["index"]["lifecycle"] = {
+        "name": f"M{retention_months}_rollover",
+        "rollover_alias": rollover_alias,
+    }
     return index_template
 
 

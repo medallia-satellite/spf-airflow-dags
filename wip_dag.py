@@ -92,36 +92,9 @@ def wip_dag():
             num_months = retrieve("ilm_settings", tenant)["retention"]
             # get
             index_template = data["value"]["index_template"]
-            ref = {'index_patterns': [f'seaas-{tenant}-*'],
- 'template': {'mappings': {'properties': {'comments': {'properties': {'language': {'type': 'keyword'},
-                                                                      'linguisticConnections': {'analyzer': 'topic-builder-analyzer',
-                                                                                                'position_increment_gap': 1000,
-                                                                                                'type': 'text'},
-                                                                      'linguisticConnectionsIndexes': {'type': 'short'},
-                                                                      'name': {'type': 'keyword'},
-                                                                      'persona': {'type': 'keyword'},
-                                                                      'sentenceContent': {'analyzer': 'topic-builder-analyzer',
-                                                                                          'type': 'text'},
-                                                                      'sentenceIndex': {'type': 'short'},
-                                                                      'wordEndIndexes': {'type': 'integer'},
-                                                                      'wordStartIndexes': {'type': 'integer'}},
-                                                       'type': 'nested'},
-                                          'responseDate': {'type': 'date'},
-                                          'surveyId': {'type': 'long'}}},
-              'settings': {'index': {'analysis': {'analyzer': {'topic-builder-analyzer': {'filter': ['compound_capture'],
-                                                                                'tokenizer': 'whitespace',
-                                                                                'type': 'custom'}},
-                                        'filter': {'compound_capture': {'patterns': ['(!?[^@!@]+)@!@'],
-                                                                        'preserve_original': 'false',
-                                                                        'type': 'pattern_capture'}}},
-                            'lifecycle': {
-                                'name': f'M{num_months}_rollover',
-                                'rollover_alias': f'{tenant}-rollover',
-                            },
-                           'number_of_replicas': '1',
-                           'number_of_shards': '1'}}}}
             _ = index_template.pop("composed_of")
-            if index_template != ref:
+
+            if index_template != generate_index_template(tenant=tenant, retention_months=num_months):
                 return failure(key=tenant, error=f"Invalid template: {index_template}")
             return success(key=tenant, value="")
 
