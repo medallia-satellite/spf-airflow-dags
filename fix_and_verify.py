@@ -124,7 +124,7 @@ def default_index_mappings():
         }
     }
 
-def generate_index_template(tenant, retention_months):
+def expected_index_template(tenant, retention_months):
     rollover_alias = f"{tenant}-rollover"
     index_pattern = f"seaas-{tenant}-*"
     index_template = {

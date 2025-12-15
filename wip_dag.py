@@ -84,24 +84,25 @@ def wip_dag():
         e = extract_ilm_setting.expand(data=f)
         return push(e)
 
+    def is_valid_index_template(tenant, index_template):
+        num_months = retrieve("ilm_settings", tenant)["retention"]
+        return index_template == expected_index_template(tenant=tenant, retention_months=num_months)
+
     @task_group
     def index_templates(upstream: List[Result]):
         @task(task_id="extract")
-        def extract_fetch_index_template(data):
+        def extract_index_template(data):
             tenant = data["key"]
-            num_months = retrieve("ilm_settings", tenant)["retention"]
-            # get
             index_template = data["value"]["index_template"]
             _ = index_template.pop("composed_of")
 
-            if index_template != generate_index_template(tenant=tenant, retention_months=num_months):
+            if not is_valid_index_template(tenant, index_template):
                 return failure(key=tenant, error=f"Invalid template: {index_template}")
-            return success(key=tenant, value="")
+            return success(key=tenant, value=index_template)
 
         f = fetch_index_templates.partial(hook=hook_get).expand(data=upstream)
-        e = extract_fetch_index_template.expand(data=f)
+        e = extract_index_template.expand(data=f)
         return push(e)
-
 
     def expected_monthly_aliases(tenant):
         num_months = retrieve("ilm_settings", tenant)["retention"]
@@ -116,14 +117,13 @@ def wip_dag():
         @task
         def flatten_results(results: List[List[Result]]) -> List[Result]:
             flattened = [item for sublist in results for item in sublist]
-            print(f"Flattened result size: {len(flattened)}")
-            print(f"OK monthly indices: {len([r for r in flattened if r['success']])}/{len(flattened)}")
-            print(
-                f"Missing monthly indices: {len([r for r in flattened if r['error'] == 'Missing index'])}/{len(flattened)}")
-            print(
-                f"Indices with missing aliases: {len([r for r in flattened if r['error'] == 'Alias not complete'])}/{len(flattened)}")
-            print(
-                f"Non unique monthly indices: {len([r for r in flattened if r['error'] == 'Monthly index not unique'])}/{len(flattened)}")
+            print(f"""
+                Flattened result size: {len(flattened)}
+                OK monthly indices: {len([r for r in flattened if r['success']])}/{len(flattened)}
+                Missing monthly indices: {len([r for r in flattened if r['error'] == 'Missing index'])}/{len(flattened)}
+                Indices with missing aliases: {len([r for r in flattened if r['error'] == 'Alias not complete'])}/{len(flattened)}
+                Non unique monthly indices: {len([r for r in flattened if r['error'] == 'Monthly index not unique'])}/{len(flattened)}
+            """)
             return flattened
 
         @task
@@ -159,11 +159,19 @@ def wip_dag():
         def extract_missing_monthly_indices(data: List[Result]):
             extracted = [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Missing index"]
             for r in extracted:
-                print(f"Missing monthly indices: {r['key']}/{r['value']}")
+                print(f"Missing monthly index: {r['key']}/{r['value']}")
             return extracted
 
         @task
         def create_missing_monthly_indices(data: Result):
+            # pkgdentest_topic-builder-pkgdentest.medallia.com-pkgdentest-2026-01-01
+            # index details: tenant id, origination_date
+            index = f"{data['key']}/{data['value']}"
+            origination_date = 1
+            payload = {
+                "settings": {"index.lifecycle.origination_date": origination_date},
+                "aliases": generate_aliases(index)
+            }
             return data
 
         return create_missing_monthly_indices.expand(data=extract_missing_monthly_indices(data=upstream))
