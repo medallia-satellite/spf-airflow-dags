@@ -11,11 +11,13 @@ from repo.utils import *
 def xcom_pull(task_id: str, key: str) -> Any:
     context = get_current_context()
     ti = context["ti"]
+    print(f"xcom_pull {task_id} {key}")
     return ti.xcom_pull(task_ids=task_id, key=key)
 
 def xcom_push(key: str, value: Any) -> None:
     context = get_current_context()
     ti = context["ti"]
+    print(f"xcom_push {key} {value}")
     ti.xcom_push(key, value)
 
 
