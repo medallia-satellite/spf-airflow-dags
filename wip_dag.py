@@ -157,9 +157,21 @@ def wip_dag():
                     return failure(key=tenant, error="Missing index")
             return success(key=tenant, value=None)
 
-        i = index_templates.expand(data=ilm_settings.expand(data=upstream))
-        monthly_aliases.expand(data=i)
-        monthly_indices.expand(data=i)
+        @task
+        def categorize_errors(ilm_settings_results, index_templates_results, monthly_aliases_results, monthly_indices_results):
+            return {
+                "ilm_settings": [success(key=r["key"], value=None) for r in ilm_settings_results if not r["success"]],
+                "index_templates": [success(key=r["key"], value=None) for r in index_templates_results if not r["success"]],
+                "monthly_aliases": [success(key=r["key"], value=None) for r in monthly_aliases_results if not r["success"]],
+                "monthly_indices": [success(key=r["key"], value=None) for r in monthly_indices_results if not r["success"]],
+            }
+
+        v1 = ilm_settings.expand(data=upstream)
+        v2 = index_templates.expand(data=v1)
+        v3 = monthly_aliases.expand(data=v2)
+        v4 = monthly_indices.expand(data=v2)
+        return categorize_errors(v1, v2, v3, v4)
+
 
 
     def generate_past_month_starts(n):
