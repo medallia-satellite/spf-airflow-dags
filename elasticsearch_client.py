@@ -39,7 +39,7 @@ def _filter_and_push(results, filter_fn):
 
 @task
 def fetch_aliases(hook: HttpHook):
-    results = _fetch_from_endpoint(hook, "/aliases")
+    results = _fetch_from_endpoint(hook, "/_aliases")
     _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
     return success("all", list(results.keys()))
 
