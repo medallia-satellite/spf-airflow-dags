@@ -39,6 +39,7 @@ def wip_dag():
             indices = xcom_pull("fetch_and_group_indices.push", tenant)
             il_list = []
             for index in indices:
+                print(f"Pulling settings for {index}")
                 s = xcom_pull("fetch_settings", index)
                 il_list.append(s["settings"]["index"]["lifecycle"])
 
