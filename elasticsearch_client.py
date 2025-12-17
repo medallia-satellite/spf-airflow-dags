@@ -19,7 +19,7 @@ def xcom_push(key: str, value: Any) -> None:
     ti.xcom_push(key, value)
 
 
-def _fetch_from_endpoint(hook: HttpHook, endpoint: str):
+def fetch_from_endpoint(hook: HttpHook, endpoint: str):
     response = hook.run(
         endpoint=endpoint,
         headers={'Accept': 'application/json'},
@@ -27,40 +27,6 @@ def _fetch_from_endpoint(hook: HttpHook, endpoint: str):
     hook.check_response(response)
     return response.json()
 
-@task
-def fetch_indices(hook: HttpHook) -> List[str]:
-    results = _fetch_from_endpoint(hook, "/_cat/indices?h=index&format=json")
-    return [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
-
-def _filter_and_push(results, filter_fn):
-    for k, v in results.items():
-        if filter_fn(k):
-            xcom_push(k, v)
-
-@task
-def fetch_aliases(hook: HttpHook):
-    results = _fetch_from_endpoint(hook, "/_aliases")
-    _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
-    return success("all", list(results.keys()))
-
-@task
-def fetch_settings(hook: HttpHook):
-    results = _fetch_from_endpoint(hook,"/_settings/index.lifecycle.name,index.lifecycle.rollover_alias")
-    _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
-    return success("all", list(results.keys()))
-
-@task
-def fetch_mappings(hook: HttpHook):
-    results = _fetch_from_endpoint(hook,"/_mappings")
-    _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
-    return success("all", list(results.keys()))
-
-@task
-def fetch_index_templates(hook: HttpHook):
-    results = _fetch_from_endpoint(hook,"/_index_template/*-rollover")
-    results = {r["name"]: r["index_template"] for r in results["index_templates"]}
-    _filter_and_push(results, lambda x: ALIAS_REGEX_MAPPING["rollover"].match(x))
-    return success("all", list(results.keys()))
 
 #########################################
 @task(task_id="fetch")

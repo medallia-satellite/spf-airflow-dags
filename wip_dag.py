@@ -16,20 +16,53 @@ from repo.utils import *
     catchup=False,
 )
 def wip_dag():
-    hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
     @task_group
-    def fetch(hook):
-        f1 = fetch_aliases(hook=hook)
-        f2 = fetch_mappings(hook=hook)
-        f3 = fetch_settings(hook=hook)
-        f4 = fetch_index_templates(hook=hook)
-        f5 = fetch_indices(hook=hook)
+    def fetch(hook: HttpHook):
+        def _filter_and_push(results, filter_fn) -> Result:
+            for k, v in results.items():
+                if filter_fn(k):
+                    xcom_push(k, v)
+            return success("all", list(results.keys()))
+
+        @task
+        def aliases(h: HttpHook) -> Result:
+            results = fetch_from_endpoint(h, "/_aliases")
+            return _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
+
+        @task
+        def settings(h: HttpHook) -> Result:
+            results = fetch_from_endpoint(h, "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias")
+            return _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
+
+        @task
+        def mappings(h: HttpHook) -> Result:
+            results = fetch_from_endpoint(h, "/_mappings")
+            return _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
+
+        @task
+        def index_template(h: HttpHook) -> Result:
+            results = fetch_from_endpoint(h, "/_index_template/*-rollover")
+            return _filter_and_push(
+                {r["name"]: r["index_template"] for r in results["index_templates"]},
+                lambda x: ALIAS_REGEX_MAPPING["rollover"].match(x),
+            )
+
+        @task
+        def indices(h: HttpHook) -> List[str]:
+            results = fetch_from_endpoint(h, "/_cat/indices?h=index&format=json")
+            return [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
+
+        f1 = aliases(h=hook)
+        f2 = mappings(h=hook)
+        f3 = settings(h=hook)
+        f4 = index_template(h=hook)
+        f5 = indices(h=hook)
         [f1, f2, f3, f4] >> f5
         return f5
 
     @task_group
-    def fetch_and_group_indices(upstream):
+    def group_indices(upstream):
         @task
         def group_by_tenant(indices: list):
             result = defaultdict(list)
@@ -41,15 +74,15 @@ def wip_dag():
         return push(grouped)
 
     @task_group
-    def ilm_settings(upstream: List[Result]):
-        @task(task_id="extract")
-        def validate(data):
-            tenant = data["key"]
-            indices = xcom_pull("fetch_and_group_indices.push", tenant)
+    def validate(upstream):
+        @task
+        def ilm_settings(data):
+            tenant = data["value"]
+            indices = xcom_pull("group_indices.push", tenant)
             il_list = []
             for index in indices:
                 print(f"Pulling settings for {index}")
-                if s := xcom_pull("fetch.fetch_settings", index):
+                if s := xcom_pull("fetch.settings", index):
                     il_list.append(s["settings"]["index"]["lifecycle"])
                 else:
                     print(f"No settings for {index}")
@@ -75,34 +108,60 @@ def wip_dag():
             if len(rollover_aliases) != 1:
                 return failure(key=tenant, error=f"Rollover alias is not unique {rollover_aliases}")
 
-            result = {
+            xcom_push(key=tenant, value={
                 "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
                 "rollover_alias": next(iter(rollover_aliases)),
-            }
+            })
 
-            return success(key=tenant, value=result)
+            return success(key=tenant, value=None)
 
-        e = validate.expand(data=upstream)
-        return push(e)
-
-    def is_valid_index_template(tenant, index_template):
-        num_months = retrieve("ilm_settings", tenant)["retention"]
-        return index_template == expected_index_template(tenant=tenant, retention_months=num_months)
-
-    @task_group
-    def index_templates(upstream: List[Result]):
-        @task(task_id="extract")
-        def validate(data):
+        @task
+        @chain_on_success
+        def index_templates(data):
             tenant = data["key"]
-            index_template = xcom_pull("fetch.fetch_index_templates", f"{tenant}-rollover")
-            _ = index_template.pop("composed_of")
+            settings = xcom_pull("validate.ilm_settings", tenant)
 
-            if not is_valid_index_template(tenant, index_template):
-                return failure(key=tenant, error=f"Invalid template: {index_template}")
+            index_template = xcom_pull("fetch.index_template", settings["rollover_alias"])
+            _ = index_template.pop("composed_of")
+            if index_template != expected_index_template(tenant=tenant, retention_months=settings["retention"]):
+                return failure(key=tenant, error=f"Invalid index template: {index_template}")
+            xcom_push(key=tenant, value=index_template)
             return success(key=tenant, value=index_template)
 
-        e = validate.expand(data=upstream)
-        return push(e)
+        @task
+        @chain_on_success
+        def monthly_aliases(data):
+            tenant = data["key"]
+            indices = retrieve("group_indices", tenant)
+            num_months = xcom_pull("validate.ilm_settings", tenant)["retention"]
+
+            active_indices = []
+            for month_start in generate_past_month_starts(num_months):
+                active_indices += [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]
+
+            for index in active_indices:
+                aliases = xcom_pull("fetch.aliases", index)
+                if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases["aliases"].keys()]):
+                    return failure(key=tenant, error="Alias not complete")
+
+            return success(key=tenant, value=None)
+
+        @task
+        @chain_on_success
+        def monthly_indices(data):
+            tenant = data["key"]
+            indices = retrieve("group_indices", tenant)
+            num_months = xcom_pull("validate.ilm_settings", tenant)["retention"]
+
+            for month_start in generate_past_month_starts(num_months):
+                if not [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]:
+                    return failure(key=tenant, error="Missing index")
+            return success(key=tenant, value=None)
+
+        i = index_templates.expand(ilm_settings.expand(upstream=upstream))
+        monthly_aliases.expand(data=i)
+        monthly_indices.expand(data=i)
+
 
     def generate_past_month_starts(n):
         current_month_start = datetime.datetime.today().replace(day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc) + relativedelta(months=1)
@@ -126,7 +185,7 @@ def wip_dag():
         @task
         def validate_monthly_indices_per_tenant(data: Result) -> List[Result]:
             tenant = data["key"]
-            indices = retrieve("fetch_and_group_indices", tenant)
+            indices = retrieve("group_indices", tenant)
             num_months = retrieve("ilm_settings", tenant)["retention"]
 
             results = []
@@ -139,7 +198,7 @@ def wip_dag():
                     results.append(failure(key=tenant, value=month_start, error=f"Monthly index not unique"))
                     continue
                 index = monthly_indices[0]
-                aliases = xcom_pull("fetch.fetch_aliases", index)
+                aliases = xcom_pull("fetch.aliases", index)
                 if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases["aliases"].keys()]):
                     results.append(failure(key=tenant, value=index, error="Alias not complete"))
                     continue
@@ -194,13 +253,15 @@ def wip_dag():
 
         return assign_missing_aliases_to_indices.expand(data=extract_indices_with_missing_aliases(data=upstream))
 
+    hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
+
     f = fetch(hook=hook_get)
-    fgi = fetch_and_group_indices(f)
-
-    validated = validate_monthly_indices_and_aliases(index_templates(upstream=ilm_settings(upstream=fgi)))
-
-    indices_with_missing_aliases(validated)
-    add_missing_months(validated)
+    fgi = group_indices(f)
+    validate(fgi)
+    # validated = validate_monthly_indices_and_aliases(index_templates(upstream=ilm_settings(upstream=fgi)))
+    #
+    # indices_with_missing_aliases(validated)
+    # add_missing_months(validated)
 
 
 wip_dag()
