@@ -216,7 +216,7 @@ def wip_dag():
             return data["monthly_aliases"]
         @task
         def fix(data):
-            tenant = data["key"]
+            tenant = data
             indices = retrieve("group_indices", tenant)
             num_months = xcom_pull("validate.ilm_settings", tenant)[0]["retention"]
 
