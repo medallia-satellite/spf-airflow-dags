@@ -181,30 +181,42 @@ def wip_dag():
     @task_group
     def fix_monthly_aliases(upstream):
         @task
+        def extract(data):
+            return data["monthly_aliases"]
+        @task
         def fix(data):
             print(data)
-        return fix.expand(data=upstream["monthly_aliases"])
+        return fix.expand(data=extract(upstream))
 
     @task_group
     def fix_monthly_indices(upstream):
         @task
+        def extract(data):
+            return data["monthly_indices"]
+        @task
         def fix(data):
             print(data)
-        return fix.expand(data=upstream["monthly_indices"])
+        return fix.expand(data=extract(upstream))
 
     @task_group
     def fix_index_templates(upstream):
         @task
+        def extract(data):
+            return data["index_templates"]
+        @task
         def fix(data):
             print(data)
-        return fix.expand(data=upstream["index_templates"])
+        return fix.expand(data=extract(upstream))
 
     @task_group
     def fix_ilm_settings(upstream):
         @task
+        def extract(data):
+            return data["ilm_settings"]
+        @task
         def fix(data):
             print(data)
-        return fix.expand(data=upstream["ilm_settings"])
+        return fix.expand(data=extract(upstream))
 
     @task_group
     def validate_monthly_indices_and_aliases(upstream: List[Result]):
