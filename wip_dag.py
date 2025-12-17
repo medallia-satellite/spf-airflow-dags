@@ -36,7 +36,7 @@ def wip_dag():
         @task(task_id="extract")
         def validate(data):
             tenant = data["key"]
-            indices = xcom_pull("fetch_indices", tenant)
+            indices = xcom_pull("fetch_and_group_indices.push", tenant)
             il_list = []
             for index in indices:
                 s = xcom_pull("fetch_settings", index)
