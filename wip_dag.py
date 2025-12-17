@@ -19,7 +19,17 @@ def wip_dag():
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
     @task_group
-    def fetch_and_group_indices():
+    def fetch(hook):
+        f1 = fetch_aliases(hook=hook)
+        f2 = fetch_mappings(hook=hook)
+        f3 = fetch_settings(hook=hook)
+        f4 = fetch_index_templates(hook=hook)
+        f5 = fetch_indices(hook=hook)
+        [f1, f2, f3, f4] >> f5
+        return f5
+
+    @task_group
+    def fetch_and_group_indices(upstream):
         @task
         def group_by_tenant(indices: list):
             result = defaultdict(list)
@@ -27,8 +37,7 @@ def wip_dag():
                 result[BASE_REGEX.search(index).group(0)].append(index)
             return [success(key=k, value=v) for k, v in result.items()]
 
-        fetched = fetch_indices(hook=hook_get)
-        grouped = group_by_tenant(fetched)
+        grouped = group_by_tenant(upstream)
         return push(grouped)
 
     @task_group
@@ -40,7 +49,7 @@ def wip_dag():
             il_list = []
             for index in indices:
                 print(f"Pulling settings for {index}")
-                if s := xcom_pull("fetch_settings", index):
+                if s := xcom_pull("fetch.fetch_settings", index):
                     il_list.append(s["settings"]["index"]["lifecycle"])
                 else:
                     print(f"No settings for {index}")
@@ -85,7 +94,7 @@ def wip_dag():
         @task(task_id="extract")
         def validate(data):
             tenant = data["key"]
-            index_template = xcom_pull("fetch_index_templates", f"{tenant}-rollover")
+            index_template = xcom_pull("fetch.fetch_index_templates", f"{tenant}-rollover")
             _ = index_template.pop("composed_of")
 
             if not is_valid_index_template(tenant, index_template):
@@ -130,7 +139,7 @@ def wip_dag():
                     results.append(failure(key=tenant, value=month_start, error=f"Monthly index not unique"))
                     continue
                 index = monthly_indices[0]
-                aliases = xcom_pull("fetch_aliases", index)
+                aliases = xcom_pull("fetch.fetch_aliases", index)
                 if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases["aliases"].keys()]):
                     results.append(failure(key=tenant, value=index, error="Alias not complete"))
                     continue
@@ -185,14 +194,8 @@ def wip_dag():
 
         return assign_missing_aliases_to_indices.expand(data=extract_indices_with_missing_aliases(data=upstream))
 
-    f1 = fetch_aliases(hook=hook_get)
-    f2 = fetch_mappings(hook=hook_get)
-    f3 = fetch_settings(hook=hook_get)
-    f4 = fetch_index_templates(hook=hook_get)
-    fgi = fetch_and_group_indices()
-    [f1, f2, f3, f4] >> fgi
-
-
+    f = fetch(hook=hook_get)
+    fgi = fetch_and_group_indices(f)
 
     validated = validate_monthly_indices_and_aliases(index_templates(upstream=ilm_settings(upstream=fgi)))
 
