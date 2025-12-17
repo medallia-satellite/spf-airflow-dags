@@ -77,7 +77,7 @@ def wip_dag():
         return push(e)
 
     def is_valid_index_template(tenant, index_template):
-        num_months = retrieve("ilm_settings.push", tenant)["retention"]
+        num_months = retrieve("ilm_settings", tenant)["retention"]
         return index_template == expected_index_template(tenant=tenant, retention_months=num_months)
 
     @task_group
