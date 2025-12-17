@@ -200,13 +200,37 @@ def wip_dag():
         return [current_month_start - relativedelta(months=i) for i in range(n)]
 
     @task_group
+    def fix_rollover_aliases(upstream):
+        @task
+        def extract(data):
+            return data["rollover_aliases"]
+        @task
+        def fix(data):
+            print(data)
+        return fix.expand(data=extract(upstream))
+
+    @task_group
     def fix_monthly_aliases(upstream):
         @task
         def extract(data):
             return data["monthly_aliases"]
         @task
         def fix(data):
-            print(data)
+            tenant = data["key"]
+            indices = retrieve("group_indices", tenant)
+            num_months = xcom_pull("validate.ilm_settings", tenant)[0]["retention"]
+
+            active_indices = []
+            for month_start in generate_past_month_starts(num_months):
+                active_indices += [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]
+
+            for index in active_indices:
+                aliases = xcom_pull("fetch.aliases", index)
+                if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases["aliases"].keys()]):
+                    print(f"{aliases['aliases'].keys()}")
+
+            return success(key=tenant, value=None)
+
         return fix.expand(data=extract(upstream))
 
     @task_group
@@ -216,7 +240,21 @@ def wip_dag():
             return data["monthly_indices"]
         @task
         def fix(data):
-            print(data)
+            tenant = data["key"]
+            tenant_id = 1234
+            indices = retrieve("group_indices", tenant)
+            num_months = xcom_pull("validate.ilm_settings", tenant)["retention"]
+
+            for month_start in generate_past_month_starts(num_months):
+                if not [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]:
+                    index = f"{tenant}-{month_start:%Y-%m-%d}-{tenant_id}-0"
+                    origination_date = data['value'].timestamp()
+                    payload = {
+                        "settings": {"index.lifecycle.origination_date": origination_date},
+                        "aliases": generate_aliases(index)
+                    }
+                    print(f"{index}: {payload}")
+            return success(key=tenant, value=None)
         return fix.expand(data=extract(upstream))
 
     @task_group
@@ -239,91 +277,6 @@ def wip_dag():
             print(data)
         return fix.expand(data=extract(upstream))
 
-    @task_group
-    def validate_monthly_indices_and_aliases(upstream: List[Result]):
-        @task
-        def flatten_results(results: List[List[Result]]) -> List[Result]:
-            flattened = [item for sublist in results for item in sublist]
-            print(f"""
-                Flattened result size: {len(flattened)}
-                OK monthly indices: {len([r for r in flattened if r['success']])}/{len(flattened)}
-                Missing monthly indices: {len([r for r in flattened if r['error'] == 'Missing index'])}/{len(flattened)}
-                Indices with missing aliases: {len([r for r in flattened if r['error'] == 'Alias not complete'])}/{len(flattened)}
-                Non unique monthly indices: {len([r for r in flattened if r['error'] == 'Monthly index not unique'])}/{len(flattened)}
-            """)
-            return flattened
-
-        @task
-        def validate_monthly_indices_per_tenant(data: Result) -> List[Result]:
-            tenant = data["key"]
-            indices = retrieve("group_indices", tenant)
-            num_months = retrieve("ilm_settings", tenant)["retention"]
-
-            results = []
-            for month_start in generate_past_month_starts(num_months):
-                monthly_indices = [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]
-                if not monthly_indices:
-                    results.append(failure(key=tenant, value=month_start, error="Missing index"))
-                    continue
-                if len(monthly_indices) != 1:
-                    results.append(failure(key=tenant, value=month_start, error=f"Monthly index not unique"))
-                    continue
-                index = monthly_indices[0]
-                aliases = xcom_pull("fetch.aliases", index)
-                if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases["aliases"].keys()]):
-                    results.append(failure(key=tenant, value=index, error="Alias not complete"))
-                    continue
-
-                results.append(success(key=tenant, value=index))
-            return results
-
-        expanded = validate_monthly_indices_per_tenant.expand(data=upstream)
-        return flatten_results(results=expanded)
-
-
-    @task_group
-    def add_missing_months(upstream: List[Result]):
-        @task
-        def extract_missing_monthly_indices(data: List[Result]):
-            extracted = [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Missing index"]
-            for r in extracted:
-                print(f"Missing monthly index: {r['key']}-{r['value']}")
-            return extracted
-
-        @task
-        def create_missing_monthly_indices(data: Result):
-            # pkgdentest_topic-builder-pkgdentest.medallia.com-pkgdentest-2026-01-01
-            # index details: tenant id, origination_date
-            month = data['value']
-            tenant = data["key"]
-            tenant_id = 1234
-
-            index = f"{tenant}-{month:%Y-%m-%d}-{tenant_id}-0"
-            origination_date = data['value'].timestamp()
-            payload = {
-                "settings": {"index.lifecycle.origination_date": origination_date},
-                "aliases": generate_aliases(index)
-            }
-            return data
-
-        return create_missing_monthly_indices.expand(data=extract_missing_monthly_indices(data=upstream))
-
-
-    @task_group
-    def indices_with_missing_aliases(upstream: List[Result]):
-        @task
-        def extract_indices_with_missing_aliases(data: List[Result]):
-            extracted = [success(key=d["key"], value=d["value"]) for d in data if d["error"] == "Alias not complete"]
-            for r in extracted:
-                print(f"Indices with missing aliases: {r['key']}/{r['value']}")
-            return extracted
-
-        @task
-        def assign_missing_aliases_to_indices(data: Result):
-            return data
-
-        return assign_missing_aliases_to_indices.expand(data=extract_indices_with_missing_aliases(data=upstream))
-
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
     f = fetch(hook=hook_get)
@@ -333,6 +286,7 @@ def wip_dag():
     fix_index_templates(v)
     fix_monthly_indices(v)
     fix_monthly_aliases(v)
+    fix_rollover_aliases(v)
 
     # validated = validate_monthly_indices_and_aliases(index_templates(upstream=ilm_settings(upstream=fgi)))
     #
