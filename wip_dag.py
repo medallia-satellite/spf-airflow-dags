@@ -161,18 +161,18 @@ def wip_dag():
         def categorize_errors(ilm_settings_results, index_templates_results, monthly_aliases_results, monthly_indices_results):
             errors = {
                 "ilm_settings": [r["key"] for r in ilm_settings_results if not r["success"]],
-                "index_templates": [r["key"] for r in index_templates_results if "Invalid index template" in r["error"]],
-                "monthly_aliases": [r["key"] for r in monthly_aliases_results if "Alias" in r["error"]],
-                "monthly_indices": [r["key"] for r in monthly_indices_results if "Missing index" in r["error"]],
+                "index_templates": [r["key"] for r in index_templates_results if not r["success"] and "Invalid index template" in r["error"]],
+                "monthly_aliases": [r["key"] for r in monthly_aliases_results if not r["success"] and "Alias" in r["error"]],
+                "monthly_indices": [r["key"] for r in monthly_indices_results if not r["success"] and "Missing index" in r["error"]],
             }
             print(json.dumps(errors, indent=2))
             return errors
 
-        v1 = ilm_settings.expand(data=upstream)
-        v2 = index_templates.expand(data=v1)
-        v3 = monthly_aliases.expand(data=v2)
-        v4 = monthly_indices.expand(data=v2)
-        return categorize_errors(v1, v2, v3, v4)
+        t1 = ilm_settings.expand(data=upstream)
+        t2 = index_templates.expand(data=t1)
+        t3 = monthly_aliases.expand(data=t2)
+        t4 = monthly_indices.expand(data=t2)
+        return categorize_errors(t1, t2, t3, t4)
 
 
 
