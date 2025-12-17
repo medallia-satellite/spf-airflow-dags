@@ -77,7 +77,7 @@ def wip_dag():
         return push(e)
 
     def is_valid_index_template(tenant, index_template):
-        num_months = retrieve("ilm_settings", tenant)["retention"]
+        num_months = retrieve("ilm_settings.push", tenant)["retention"]
         return index_template == expected_index_template(tenant=tenant, retention_months=num_months)
 
     @task_group
@@ -92,8 +92,7 @@ def wip_dag():
                 return failure(key=tenant, error=f"Invalid template: {index_template}")
             return success(key=tenant, value=index_template)
 
-        f = fetch_index_template.partial(hook=hook_get).expand(data=upstream)
-        e = validate.expand(data=f)
+        e = validate.expand(data=upstream)
         return push(e)
 
     def generate_past_month_starts(n):
@@ -131,8 +130,8 @@ def wip_dag():
                     results.append(failure(key=tenant, value=month_start, error=f"Monthly index not unique"))
                     continue
                 index = monthly_indices[0]
-                aliases = retrieve("fetch_and_group_aliases", index)
-                if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases]):
+                aliases = retrieve("fetch_aliases", index)
+                if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases["aliases"].keys()]):
                     results.append(failure(key=tenant, value=index, error="Alias not complete"))
                     continue
 
