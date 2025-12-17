@@ -100,16 +100,16 @@ def wip_dag():
                 return failure(key=tenant,
                                error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
 
-            rollover_aliases = set(il["rollover_alias"] for il in il_list)
-            if not all(ALIAS_REGEX_MAPPING["rollover"].match(a) for a in rollover_aliases):
-                return failure(key=tenant, error=f"Invalid rollover alias {rollover_aliases}")
+            rollover = set(il["rollover_alias"] for il in il_list)
+            if not all(ALIAS_REGEX_MAPPING["rollover"].match(a) for a in rollover):
+                return failure(key=tenant, error=f"Invalid rollover alias {rollover}")
 
-            if len(rollover_aliases) != 1:
-                return failure(key=tenant, error=f"Rollover alias is not unique {rollover_aliases}")
+            if len(rollover) != 1:
+                return failure(key=tenant, error=f"Rollover alias is not unique {rollover}")
 
             xcom_push(key=tenant, value={
                 "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
-                "rollover_alias": next(iter(rollover_aliases)),
+                "rollover_alias": next(iter(rollover)),
             })
 
             return success(key=tenant, value=None)
