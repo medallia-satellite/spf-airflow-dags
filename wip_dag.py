@@ -129,6 +129,25 @@ def wip_dag():
 
         @task
         @chain_on_success
+        def rollover_aliases(data):
+            tenant = data["key"]
+            indices = retrieve("group_indices", tenant)
+            s = xcom_pull("validate.ilm_settings", tenant)[0]
+            current_month = generate_past_month_starts(s["retention"])[0]
+            expected = {
+                tenant: {'is_write_index': False},
+                f"{tenant}-{current_month:%Y-%m-%d}": {'is_write_index': True},
+                s["rollover_alias"]: {'is_write_index': True},
+
+            }
+            for index in indices:
+                aliases = xcom_pull("fetch.aliases", index)
+                if aliases == expected:
+                    return success(key=tenant, value=None)
+            return failure(key=tenant, error="Rollover alias misconfigured")
+
+        @task
+        @chain_on_success
         def monthly_aliases(data):
             tenant = data["key"]
             indices = retrieve("group_indices", tenant)
@@ -158,12 +177,13 @@ def wip_dag():
             return success(key=tenant, value=None)
 
         @task
-        def categorize_errors(ilm_settings_results, index_templates_results, monthly_aliases_results, monthly_indices_results):
+        def categorize_errors(ilm_settings_results, index_templates_results, monthly_aliases_results, monthly_indices_results, rollover_aliases_results):
             errors = {
                 "ilm_settings": [r["key"] for r in ilm_settings_results if not r["success"]],
                 "index_templates": [r["key"] for r in index_templates_results if not r["success"] and "Invalid index template" in r["error"]],
                 "monthly_aliases": [r["key"] for r in monthly_aliases_results if not r["success"] and "Alias" in r["error"]],
                 "monthly_indices": [r["key"] for r in monthly_indices_results if not r["success"] and "Missing index" in r["error"]],
+                "rollover_aliases_results": [r["key"] for r in rollover_aliases_results if not r["success"] and "Rollover" in r["error"]],
             }
             print(json.dumps(errors, indent=2))
             return errors
@@ -172,7 +192,8 @@ def wip_dag():
         t2 = index_templates.expand(data=t1)
         t3 = monthly_aliases.expand(data=t2)
         t4 = monthly_indices.expand(data=t2)
-        return categorize_errors(t1, t2, t3, t4)
+        t5 = rollover_aliases.expand(data=t2)
+        return categorize_errors(t1, t2, t3, t4, t5)
 
     def generate_past_month_starts(n):
         current_month_start = datetime.datetime.today().replace(day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc) + relativedelta(months=1)
