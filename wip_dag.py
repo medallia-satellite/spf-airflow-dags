@@ -243,7 +243,7 @@ def wip_dag():
             tenant = data
             tenant_id = 1234
             indices = retrieve("group_indices", tenant)
-            num_months = xcom_pull("validate.ilm_settings", tenant)["retention"]
+            num_months = xcom_pull("validate.ilm_settings", tenant)[0]["retention"]
 
             for month_start in generate_past_month_starts(num_months):
                 if not [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]:
