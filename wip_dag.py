@@ -159,12 +159,14 @@ def wip_dag():
 
         @task
         def categorize_errors(ilm_settings_results, index_templates_results, monthly_aliases_results, monthly_indices_results):
-            return {
-                "ilm_settings": [success(key=r["key"], value=None) for r in ilm_settings_results if not r["success"]],
-                "index_templates": [success(key=r["key"], value=None) for r in index_templates_results if not r["success"]],
-                "monthly_aliases": [success(key=r["key"], value=None) for r in monthly_aliases_results if not r["success"]],
-                "monthly_indices": [success(key=r["key"], value=None) for r in monthly_indices_results if not r["success"]],
+            errors = {
+                "ilm_settings": [r["key"] for r in ilm_settings_results if not r["success"]],
+                "index_templates": [r["key"] for r in index_templates_results if "Invalid index template" in r["error"]],
+                "monthly_aliases": [r["key"] for r in monthly_aliases_results if "Alias" in r["error"]],
+                "monthly_indices": [r["key"] for r in monthly_indices_results if "Missing index" in r["error"]],
             }
+            print(json.dumps(errors, indent=2))
+            return errors
 
         v1 = ilm_settings.expand(data=upstream)
         v2 = index_templates.expand(data=v1)
