@@ -77,7 +77,7 @@ def wip_dag():
     def validate(upstream):
         @task
         def ilm_settings(data):
-            tenant = data["value"]
+            tenant = data["key"]
             indices = xcom_pull("group_indices.push", tenant)
             il_list = []
             for index in indices:
