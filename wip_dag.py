@@ -36,8 +36,9 @@ def wip_dag():
         @task(task_id="extract")
         def validate(data):
             tenant = data["key"]
+            indices = xcom_pull("fetch_indices", tenant)
             il_list = []
-            for index in data["value"]:
+            for index in indices:
                 s = xcom_pull("fetch_settings", index)
                 il_list.append(s["settings"]["index"]["lifecycle"])
 
