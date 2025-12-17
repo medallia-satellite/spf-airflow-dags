@@ -107,19 +107,18 @@ def wip_dag():
             if len(rollover_aliases) != 1:
                 return failure(key=tenant, error=f"Rollover alias is not unique {rollover_aliases}")
 
-            result = {
+            xcom_push(key=tenant, value={
                 "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
                 "rollover_alias": next(iter(rollover_aliases)),
-            }
-            xcom_push(key=tenant, value=result)
+            })
 
-            return success(key=tenant, value=result)
+            return success(key=tenant, value=None)
 
         @task
         @chain_on_success
         def index_templates(data):
             tenant = data["key"]
-            settings = data["value"]
+            settings = xcom_pull("validate.ilm_settings", tenant)[0]
 
             index_template = xcom_pull("fetch.index_template", settings["rollover_alias"])
             _ = index_template.pop("composed_of")
@@ -133,7 +132,7 @@ def wip_dag():
         def monthly_aliases(data):
             tenant = data["key"]
             indices = retrieve("group_indices", tenant)
-            num_months = xcom_pull("validate.ilm_settings", tenant)["retention"]
+            num_months = xcom_pull("validate.ilm_settings", tenant)[0]["retention"]
 
             active_indices = []
             for month_start in generate_past_month_starts(num_months):
@@ -151,7 +150,7 @@ def wip_dag():
         def monthly_indices(data):
             tenant = data["key"]
             indices = retrieve("group_indices", tenant)
-            num_months = xcom_pull("validate.ilm_settings", tenant)["retention"]
+            num_months = xcom_pull("validate.ilm_settings", tenant)[0]["retention"]
 
             for month_start in generate_past_month_starts(num_months):
                 if not [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]:
