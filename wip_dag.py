@@ -119,6 +119,7 @@ def wip_dag():
         def index_templates(data):
             tenant = data["key"]
             settings = xcom_pull("validate.ilm_settings", tenant)
+            print(settings)
 
             index_template = xcom_pull("fetch.index_template", settings["rollover_alias"])
             _ = index_template.pop("composed_of")
