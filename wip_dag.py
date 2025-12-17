@@ -248,7 +248,7 @@ def wip_dag():
             for month_start in generate_past_month_starts(num_months):
                 if not [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]:
                     index = f"{tenant}-{month_start:%Y-%m-%d}-{tenant_id}-0"
-                    origination_date = data['value'].timestamp()
+                    origination_date = month_start.timestamp()
                     payload = {
                         "settings": {"index.lifecycle.origination_date": origination_date},
                         "aliases": generate_aliases(index)
