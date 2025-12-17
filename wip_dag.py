@@ -287,7 +287,7 @@ def wip_dag():
     fix_monthly_indices(v)
     fix_monthly_aliases(v)
     fix_rollover_aliases(v)
-
+    return v
     # validated = validate_monthly_indices_and_aliases(index_templates(upstream=ilm_settings(upstream=fgi)))
     #
     # indices_with_missing_aliases(validated)
