@@ -8,26 +8,61 @@ from repo.fix_and_verify import *
 from repo.utils import *
 
 
-@task(task_id="fetch")
+def xcom_pull(task_id: str, key: str) -> Any:
+    context = get_current_context()
+    ti = context["ti"]
+    return ti.xcom_pull(task_ids=task_id, key=key)
+
+def xcom_push(key: str, value: Any) -> None:
+    context = get_current_context()
+    ti = context["ti"]
+    ti.xcom_push(key, value)
+
+
+def _fetch_from_endpoint(hook: HttpHook, endpoint: str):
+    response = hook.run(
+        endpoint=endpoint,
+        headers={'Accept': 'application/json'},
+    )
+    hook.check_response(response)
+    return response.json()
+
+@task
+def fetch_indices(hook: HttpHook) -> List[str]:
+    results = _fetch_from_endpoint(hook, "/_cat/indices?h=index&format=json")
+    return [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
+
+def _filter_and_push(results, filter_fn):
+    for k, v in results.items():
+        if filter_fn(k):
+            xcom_push(k, v)
+
+@task
 def fetch_aliases(hook: HttpHook):
-    response = hook.run(
-        endpoint='/_cat/aliases?h=alias,index,is_write_index',
-        headers={'Accept': 'application/json'},
-    )
-    hook.check_response(response)
-    return [r for r in response.json() if BASE_REGEX.match(r["alias"])]
+    results = _fetch_from_endpoint(hook, "/aliases")
+    _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
+    return success("all", list(results.keys()))
 
+@task
+def fetch_settings(hook: HttpHook):
+    results = _fetch_from_endpoint(hook,"/_settings/index.lifecycle.name,index.lifecycle.rollover_alias")
+    _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
+    return success("all", list(results.keys()))
 
-@task(task_id="fetch")
-def fetch_indices(hook: HttpHook):
-    response = hook.run(
-        endpoint='/_cat/indices?h=index&format=json',
-        headers={'Accept': 'application/json'},
-    )
-    hook.check_response(response)
-    return [r["index"] for r in response.json() if INDEX_REGEX.match(r["index"])]
+@task
+def fetch_mappings(hook: HttpHook):
+    results = _fetch_from_endpoint(hook,"/_mappings")
+    _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
+    return success("all", list(results.keys()))
 
+@task
+def fetch_index_templates(hook: HttpHook):
+    results = _fetch_from_endpoint(hook,"/_index_template/*-rollover")
+    results = {r["name"]: r["index_template"] for r in results["index_templates"]}
+    _filter_and_push(results, lambda x: ALIAS_REGEX_MAPPING["rollover"].match(x))
+    return success("all", list(results.keys()))
 
+#########################################
 @task(task_id="fetch")
 def fetch_alias_settings(hook: HttpHook, data: Result):
     alias = data["key"]
@@ -42,7 +77,7 @@ def fetch_alias_settings(hook: HttpHook, data: Result):
 
 
 @task(task_id="fetch")
-def fetch_index_templates(hook: HttpHook, data: Result):
+def fetch_index_template(hook: HttpHook, data: Result):
     index_template = f'{data["key"]}-rollover'
     response = hook.run(
         endpoint=f'/_index_template/{index_template}',
