@@ -130,7 +130,7 @@ def wip_dag():
                     results.append(failure(key=tenant, value=month_start, error=f"Monthly index not unique"))
                     continue
                 index = monthly_indices[0]
-                aliases = retrieve("fetch_aliases", index)
+                aliases = xcom_pull("fetch_aliases", index)
                 if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases["aliases"].keys()]):
                     results.append(failure(key=tenant, value=index, error="Alias not complete"))
                     continue
