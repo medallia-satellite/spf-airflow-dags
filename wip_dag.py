@@ -31,7 +31,7 @@ def wip_dag():
             return _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
 
         @task
-        def settings(h: HttpHook) -> Result:
+        def ilm_settings(h: HttpHook) -> Result:
             results = fetch_from_endpoint(h, "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias")
             return _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
 
@@ -55,7 +55,7 @@ def wip_dag():
 
         f1 = aliases(h=hook)
         f2 = mappings(h=hook)
-        f3 = settings(h=hook)
+        f3 = ilm_settings(h=hook)
         f4 = index_template(h=hook)
         f5 = indices(h=hook)
         [f1, f2, f3, f4] >> f5
@@ -81,7 +81,7 @@ def wip_dag():
             indices = xcom_pull("group_indices.push", tenant)
             il_list = []
             for index in indices:
-                if s := xcom_pull("fetch.settings", index):
+                if s := xcom_pull("fetch.ilm_settings", index):
                     il_list.append(s["settings"]["index"]["lifecycle"])
                 else:
                     print(f"No settings for {index}")
@@ -119,7 +119,7 @@ def wip_dag():
         def index_templates(data):
             tenant = data["key"]
             settings = xcom_pull("validate.ilm_settings", tenant)
-            print(settings)
+            print(dict(settings))
 
             index_template = xcom_pull("fetch.index_template", settings["rollover_alias"])
             _ = index_template.pop("composed_of")
