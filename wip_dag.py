@@ -174,12 +174,37 @@ def wip_dag():
         t4 = monthly_indices.expand(data=t2)
         return categorize_errors(t1, t2, t3, t4)
 
-
-
     def generate_past_month_starts(n):
         current_month_start = datetime.datetime.today().replace(day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc) + relativedelta(months=1)
         return [current_month_start - relativedelta(months=i) for i in range(n)]
 
+    @task_group
+    def fix_monthly_aliases(upstream):
+        @task
+        def fix(data):
+            print(data)
+        return fix.expand(data=upstream["monthly_aliases"])
+
+    @task_group
+    def fix_monthly_indices(upstream):
+        @task
+        def fix(data):
+            print(data)
+        return fix.expand(data=upstream["monthly_indices"])
+
+    @task_group
+    def fix_index_templates(upstream):
+        @task
+        def fix(data):
+            print(data)
+        return fix.expand(data=upstream["index_templates"])
+
+    @task_group
+    def fix_ilm_settings(upstream):
+        @task
+        def fix(data):
+            print(data)
+        return fix.expand(data=upstream["ilm_settings"])
 
     @task_group
     def validate_monthly_indices_and_aliases(upstream: List[Result]):
@@ -270,7 +295,12 @@ def wip_dag():
 
     f = fetch(hook=hook_get)
     fgi = group_indices(f)
-    validate(fgi)
+    v = validate(fgi)
+    fix_ilm_settings(v)
+    fix_index_templates(v)
+    fix_monthly_indices(v)
+    fix_monthly_aliases(v)
+
     # validated = validate_monthly_indices_and_aliases(index_templates(upstream=ilm_settings(upstream=fgi)))
     #
     # indices_with_missing_aliases(validated)
