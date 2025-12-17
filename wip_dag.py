@@ -158,7 +158,7 @@ def wip_dag():
                     return failure(key=tenant, error="Missing index")
             return success(key=tenant, value=None)
 
-        i = index_templates.expand(ilm_settings.expand(upstream=upstream))
+        i = index_templates.expand(ilm_settings.expand(data=upstream))
         monthly_aliases.expand(data=i)
         monthly_indices.expand(data=i)
 
