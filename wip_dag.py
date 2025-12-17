@@ -40,8 +40,10 @@ def wip_dag():
             il_list = []
             for index in indices:
                 print(f"Pulling settings for {index}")
-                s = xcom_pull("fetch_settings", index)
-                il_list.append(s["settings"]["index"]["lifecycle"])
+                if s := xcom_pull("fetch_settings", index):
+                    il_list.append(s["settings"]["index"]["lifecycle"])
+                else:
+                    print(f"No settings for {index}")
 
             if any("name" not in il for il in il_list):
                 return failure(key=tenant, error=f"Invalid policies: {il_list}")
