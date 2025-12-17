@@ -183,7 +183,7 @@ def wip_dag():
                 "index_templates": [r["key"] for r in index_templates_results if not r["success"] and "Invalid index template" in r["error"]],
                 "monthly_aliases": [r["key"] for r in monthly_aliases_results if not r["success"] and "Alias" in r["error"]],
                 "monthly_indices": [r["key"] for r in monthly_indices_results if not r["success"] and "Missing index" in r["error"]],
-                "rollover_aliases_results": [r["key"] for r in rollover_aliases_results if not r["success"] and "Rollover" in r["error"]],
+                "rollover_aliases": [r["key"] for r in rollover_aliases_results if not r["success"] and "Rollover" in r["error"]],
             }
             print(json.dumps(errors, indent=2))
             return errors
