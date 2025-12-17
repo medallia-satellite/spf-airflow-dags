@@ -187,11 +187,11 @@ def wip_dag():
     f3 = fetch_settings(hook=hook_get)
     f4 = fetch_index_templates(hook=hook_get)
     fgi = fetch_and_group_indices()
-    validate_ilm_setting.expand(data=fgi)
     [f1, f2, f3, f4] >> fgi
 
 
-    validated = validate_monthly_indices_and_aliases(index_templates(ilm))
+
+    validated = validate_monthly_indices_and_aliases(index_templates(upstream=ilm_settings(upstream=fgi)))
 
     indices_with_missing_aliases(validated)
     add_missing_months(validated)
