@@ -107,19 +107,19 @@ def wip_dag():
             if len(rollover_aliases) != 1:
                 return failure(key=tenant, error=f"Rollover alias is not unique {rollover_aliases}")
 
-            xcom_push(key=tenant, value={
+            result = {
                 "retention": next(iter(set(POLICY_MAPPING.get(p) for p in policies))),
                 "rollover_alias": next(iter(rollover_aliases)),
-            })
+            }
+            xcom_push(key=tenant, value=result)
 
-            return success(key=tenant, value=None)
+            return success(key=tenant, value=result)
 
         @task
         @chain_on_success
         def index_templates(data):
             tenant = data["key"]
-            settings = xcom_pull("validate.ilm_settings", tenant)
-            print(dict(settings))
+            settings = data["value"]
 
             index_template = xcom_pull("fetch.index_template", settings["rollover_alias"])
             _ = index_template.pop("composed_of")
