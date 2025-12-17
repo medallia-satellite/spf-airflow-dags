@@ -192,7 +192,7 @@ def wip_dag():
         t2 = index_templates.expand(data=t1)
         t3 = monthly_aliases.expand(data=t2)
         t4 = monthly_indices.expand(data=t2)
-        t5 = rollover_aliases.expand(data=t2)
+        t5 = rollover_aliases.expand(data=t4)
         return categorize_errors(t1, t2, t3, t4, t5)
 
     def generate_past_month_starts(n):
