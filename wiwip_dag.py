@@ -20,6 +20,9 @@ def wiwip_dag():
     def extract_success(data: List[Result]) -> List[Result]:
         return [d for d in data if d["success"]]
 
+    def generate_past_month_starts(n):
+        current_month_start = datetime.datetime.today().replace(day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc) + relativedelta(months=1)
+        return [current_month_start - relativedelta(months=i) for i in range(n)]
 
     def _filter_and_push(results, filter_fn = lambda _: True) -> List[Result]:
         filtered = []
@@ -44,7 +47,6 @@ def wiwip_dag():
             return _filter_and_push(result)
 
         return group_by_tenant(fetch(hook))
-
 
     @task_group
     def ilm_settings(hook: HttpHook, upstream: List[Result]) -> List[Result]:
@@ -127,9 +129,26 @@ def wiwip_dag():
         f >> v
         return v
 
+    @task_group
+    def monthly_indices(hook: HttpHook, upstream: List[Result]) -> List[Result]:
+        @task
+        def verify(data: Result) -> Result:
+            tenant = data["key"]
+            indices = xcom_pull("fetch_and_group_indices.group_by_tenant", tenant)
+            num_months = xcom_pull("ilm_settings.verify", tenant)[0]["retention"]
+
+            for month_start in generate_past_month_starts(num_months):
+                if not [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]:
+                    return failure(key=tenant, error="Missing index")
+            return success(key=tenant, value=None)
+        e = extract_success(data=upstream)
+        v = verify.expand(data=e)
+        return v
+
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     t1 = fetch_and_group_indices(hook=hook_get)
     t2 = ilm_settings(hook=hook_get, upstream=t1)
     t3 = index_templates(hook=hook_get, upstream=t2)
+    t4 = monthly_indices(hook=hook_get, upstream=t3)
 
 wiwip_dag()
