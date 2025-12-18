@@ -6,7 +6,7 @@ from dateutil.relativedelta import relativedelta
 
 BASE_PATTERN = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
 BASE_REGEX = re.compile(BASE_PATTERN)
-INDEX_PATTERN = rf"^seaas-{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
+INDEX_PATTERN = rf"^seaas-(?P<tenant>{BASE_PATTERN})" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
 INDEX_REGEX = re.compile(INDEX_PATTERN)
 
 def generate_monthly_aliases(alias: str, start_date: datetime.date, num_months: int) -> Iterator[Tuple[str, str]]:
