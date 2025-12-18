@@ -44,6 +44,7 @@ def fetch_from_endpoint(hook: HttpHook, endpoint: str):
 
 class Context(TypedDict, total=False):
     tenant: str
+    tenant_id: int
     success: bool
     error: Optional[str]
     stage: Optional[str]
@@ -185,13 +186,36 @@ def wiwip_dag():
         @chain_on_success
         def verify(context: Context) -> Context:
             indices = xcom_pull("fetch_and_group_indices.group_by_tenant", context["tenant"])
-
+            missing = []
             for month_start in generate_past_month_starts(context["retention"]):
-                if not [index for index in indices if f'{context["tenant"]}-{month_start:%Y-%m-%d}' in index]:
-                    return failure(context=context, stage=tg_stage, error="Missing index")
+                if not any(f'{context["tenant"]}-{month_start:%Y-%m-%d}' in index for index in indices):
+                    missing.append(month_start)
+            if missing:
+                return failure(context=context, stage=tg_stage, error=missing)
             return success(context=context, stage=tg_stage)
         v = verify.expand(context=upstream)
         return v
+
+    @task
+    def add_missing_indices(hook: HttpHook, context: Context) -> Context:
+        if context["success"] or context["stage"] != "monthly_indices":
+            return context
+
+        for month_start in context["error"]:
+            index = f'{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-0'
+            aliases = generate_aliases(index)
+            origination_date = month_start.timestamp()
+            payload = {
+                "settings": {"index.lifecycle.origination_date": origination_date},
+                "aliases": {
+                    aliases["read"]: {"is_write_index": False},
+                    aliases["write"]: {"is_write_index": True},
+                    aliases["rollover"]: {"is_write_index": False},
+                }
+            }
+            print(f"Fixing {index}: {payload}")
+
+        return success(context=context, stage="add_missing_indices")
 
     @task_group
     def aliases(hook: HttpHook, upstream: List[Context]) -> List[Context]:
@@ -232,11 +256,12 @@ def wiwip_dag():
     t2 = ilm_settings(hook=hook_get, upstream=t1)
     t3 = index_templates(hook=hook_get, upstream=t2)
     t4 = monthly_indices(hook=hook_get, upstream=t3)
-    # fix errors and refetch
+    t4_fixed = add_missing_indices(hook=hook_get).expand(context=t4)
     t5 = fetch_and_group_indices.override(group_id="refetch_and_group_indices")(hook=hook_get)
-    t4 >> t5
-    t6 = monthly_indices(hook=hook_get, upstream=t5)
+    t4_fixed >> t5
+    t6 = monthly_indices(hook=hook_get, upstream=t4_fixed)
     t5 >> t6
+    print_all(upstream=t6)
 
 
 wiwip_dag()
