@@ -216,7 +216,7 @@ def wip_dag():
             current_month = f"{tenant}-{current_month:%Y-%m-%d}"
             for index in indices:
                 aliases = xcom_pull("fetch.aliases", index)["aliases"]
-                if {'is_write_index': True} in aliases.get(current_month, []):
+                if current_month in aliases and aliases[current_month]["is_write_index"]:
                     actions.append({
                         "add": {
                             "index": index,
@@ -224,7 +224,7 @@ def wip_dag():
                             "is_write_index": True
                         }
                     })
-                elif {'is_write_index': True} in aliases.get(f"{tenant}-rollover", []):
+                elif aliases[f"{tenant}-rollover"]["is_write_index"]:
                     actions.append({
                         "add": {
                             "index": index,
