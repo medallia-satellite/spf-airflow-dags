@@ -113,8 +113,8 @@ def wiwip_dag():
 
         @task
         @chain_on_success
-        def verify(c: Context) -> Context:
-            indices = xcom_pull("fetch_and_group_indices.group_by_tenant", c["tenant"])
+        def verify(context: Context) -> Context:
+            indices = xcom_pull("fetch_and_group_indices.group_by_tenant", context["tenant"])
             il_list = []
             for index in indices:
                 if s := xcom_pull("ilm_settings.fetch", index):
@@ -123,29 +123,29 @@ def wiwip_dag():
                     print(f"No settings for {index}")
 
             if any("name" not in il for il in il_list):
-                return failure(context=c, stage=tg_stage, error=f"Invalid policies: {il_list}")
+                return failure(context=context, stage=tg_stage, error=f"Invalid policies: {il_list}")
 
             policies = set(il["name"] for il in il_list)
             if not all(p in POLICY_MAPPING for p in policies):
-                return failure(context=c, stage=tg_stage, error=f"Invalid policies: {policies}")
+                return failure(context=context, stage=tg_stage, error=f"Invalid policies: {policies}")
 
             if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-                return failure(context=c, stage=tg_stage, error=f"Retention period is not unique: {policies}")
+                return failure(context=context, stage=tg_stage, error=f"Retention period is not unique: {policies}")
 
             if any("rollover_alias" not in il for il in il_list):
-                return failure(context=c, stage=tg_stage,
+                return failure(context=context, stage=tg_stage,
                                error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
 
             rollover = set(il["rollover_alias"] for il in il_list)
-            if not all(a == f"{c['tenant']}-rollover" for a in rollover):
-                return failure(context=c, stage=tg_stage, error=f"Invalid rollover alias {rollover}")
+            if not all(a == f"{context['tenant']}-rollover" for a in rollover):
+                return failure(context=context, stage=tg_stage, error=f"Invalid rollover alias {rollover}")
 
             retention = next(iter(set(POLICY_MAPPING.get(p) for p in policies)))
 
-            return Context(tenant=c["tenant"], stage=tg_stage, success=True, retention=retention)
+            return Context(tenant=context["tenant"], stage=tg_stage, success=True, retention=retention)
 
         f = fetch(hook)
-        v = verify.expand(c=upstream)
+        v = verify.expand(context=upstream)
         f >> v
         return v
 
@@ -163,17 +163,17 @@ def wiwip_dag():
 
         @task
         @chain_on_success
-        def verify(c: Context) -> Context:
-            index_template = xcom_pull("index_templates.fetch", f'{c["tenant"]}-rollover')
+        def verify(context: Context) -> Context:
+            index_template = xcom_pull("index_templates.fetch", f'{context["tenant"]}-rollover')
             _ = index_template.pop("composed_of")
 
-            if index_template != expected_index_template(tenant=c["tenant"], retention_months=c["retention"]):
-                return failure(context=c, stage=tg_stage, error=f"Invalid index template: {index_template}")
+            if index_template != expected_index_template(tenant=context["tenant"], retention_months=context["retention"]):
+                return failure(context=context, stage=tg_stage, error=f"Invalid index template: {index_template}")
 
-            return success(context=c, stage=tg_stage)
+            return success(context=context, stage=tg_stage)
 
         f = fetch(hook)
-        v = verify.expand(c=upstream)
+        v = verify.expand(context=upstream)
         f >> v
         return v
 
@@ -183,14 +183,14 @@ def wiwip_dag():
 
         @task
         @chain_on_success
-        def verify(c: Context) -> Context:
-            indices = xcom_pull("fetch_and_group_indices.group_by_tenant", c["tenant"])
+        def verify(context: Context) -> Context:
+            indices = xcom_pull("fetch_and_group_indices.group_by_tenant", context["tenant"])
 
-            for month_start in generate_past_month_starts(c["retention"]):
-                if not [index for index in indices if f'{c["tenant"]}-{month_start:%Y-%m-%d}' in index]:
-                    return failure(context=c, stage=tg_stage, error="Missing index")
-            return success(context=c, stage=tg_stage)
-        v = verify.expand(c=upstream)
+            for month_start in generate_past_month_starts(context["retention"]):
+                if not [index for index in indices if f'{context["tenant"]}-{month_start:%Y-%m-%d}' in index]:
+                    return failure(context=context, stage=tg_stage, error="Missing index")
+            return success(context=context, stage=tg_stage)
+        v = verify.expand(context=upstream)
         return v
 
     @task_group
@@ -204,21 +204,21 @@ def wiwip_dag():
 
         @task
         @chain_on_success
-        def verify(c: Context) -> Context:
-            indices = xcom_pull("refetch_and_group_indices.group_by_tenant", c["tenant"])
+        def verify(context: Context) -> Context:
+            indices = xcom_pull("refetch_and_group_indices.group_by_tenant", context["tenant"])
 
             active_indices = []
-            for month_start in generate_past_month_starts(c["retention"]):
-                active_indices += [index for index in indices if f'{c["tenant"]}-{month_start:%Y-%m-%d}' in index]
+            for month_start in generate_past_month_starts(context["retention"]):
+                active_indices += [index for index in indices if f'{context["tenant"]}-{month_start:%Y-%m-%d}' in index]
 
             for index in active_indices:
                 aa = xcom_pull("aliases.fetch", index)
                 if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in
                             aa["aliases"].keys()]):
-                    return failure(context=c, stage=tg_stage, error="Alias not complete")
-            return success(context=c, stage=tg_stage)
+                    return failure(context=context, stage=tg_stage, error="Alias not complete")
+            return success(context=context, stage=tg_stage)
         f = fetch(hook)
-        v = verify.expand(c=upstream)
+        v = verify.expand(context=upstream)
         f >> v
         return v
 
