@@ -130,7 +130,7 @@ def wiwip_dag():
             return Context(tenant=c["tenant"], success=True, retention=retention)
 
         f = fetch(hook)
-        v = verify.expand(data=upstream)
+        v = verify.expand(c=upstream)
         f >> v
         return v
 
