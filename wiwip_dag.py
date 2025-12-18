@@ -96,8 +96,7 @@ def wiwip_dag():
         def group_by_tenant(data: list) -> List[Context]:
             results = defaultdict(list)
             for index in data:
-                m = INDEX_REGEX.fullmatch(index).groupdict()
-                results[(m["tenant"], m["tenant_id"])].append(index)
+                results[(BASE_REGEX.search(index).group(0), INDEX_REGEX.fullmatch(index).groupdict()["tenant_id"])].append(index)
 
             grouped = []
             for k, v in results.items():
