@@ -16,6 +16,11 @@ from repo.utils import *
     catchup=False,
 )
 def wiwip_dag():
+    @task
+    def extract_success(data: List[Result]) -> List[Result]:
+        return [d for d in data if d["success"]]
+
+
     def _filter_and_push(results, filter_fn = lambda _: True) -> List[Result]:
         filtered = []
         for k, v in results.items():
@@ -88,7 +93,8 @@ def wiwip_dag():
             return success(key=tenant, value=None)
 
         f = fetch(hook)
-        v = verify.expand(data=upstream)
+        e = extract_success(data=upstream)
+        v = verify.expand(data=e)
         f >> v
         return v
 
@@ -103,7 +109,6 @@ def wiwip_dag():
             )
 
         @task
-        @chain_on_success
         def verify(data: Result) -> Result:
             tenant = data["key"]
             settings = xcom_pull("ilm_settings.verify", tenant)[0]
@@ -117,7 +122,8 @@ def wiwip_dag():
             return success(key=tenant, value=index_template)
 
         f = fetch(hook)
-        v = verify.expand(data=upstream)
+        e = extract_success(data=upstream)
+        v = verify.expand(data=e)
         f >> v
         return v
 
