@@ -54,6 +54,7 @@ class Context(TypedDict, total=False):
 def success(context: Context, stage: str, value: Any = None) -> Context:
     return Context(
         tenant=context["tenant"],
+        tenant_id=context["tenant_id"],
         success=True,
         stage=stage,
         value=value if value else context.get("value"),
@@ -63,6 +64,7 @@ def success(context: Context, stage: str, value: Any = None) -> Context:
 def failure(context: Context, stage: str, error: Any = None) -> Context:
     return Context(
         tenant=context["tenant"],
+        tenant_id=context["tenant_id"],
         success=False,
         stage=stage,
         error=error if error else context.get("error"),
@@ -84,6 +86,7 @@ def wiwip_dag():
 
     @task_group
     def fetch_and_group_indices(hook: HttpHook) -> List[Context]:
+        tg_stage = "fetch_and_group_indices"
         @task
         def fetch(h: HttpHook) -> List[str]:
             results = fetch_from_endpoint(h, "/_cat/indices?h=index&format=json")
@@ -93,12 +96,13 @@ def wiwip_dag():
         def group_by_tenant(data: list) -> List[Context]:
             results = defaultdict(list)
             for index in data:
-                results[BASE_REGEX.search(index).group(0)].append(index)
+                m = INDEX_REGEX.fullmatch(index).groupdict()
+                results[(m["tenant"], m["tenant_id"])].append(index)
 
             grouped = []
             for k, v in results.items():
-                xcom_push(k, v)
-                grouped.append(Context(tenant=k, stage="fetch_and_group_indices", success=True))
+                xcom_push(k[0], v)
+                grouped.append(Context(tenant=k[0], tenant_id=k[1], stage=tg_stage, success=True))
             return grouped
 
         return group_by_tenant(fetch(hook))
