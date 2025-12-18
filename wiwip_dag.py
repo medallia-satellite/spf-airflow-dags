@@ -1,3 +1,5 @@
+import functools
+import json
 from collections import defaultdict
 from typing import TypedDict, Optional, Any, List
 
@@ -6,6 +8,14 @@ from airflow.operators.python import get_current_context
 from airflow.providers.http.hooks.http import HttpHook
 
 from repo.fix_and_verify import *
+
+def chain_on_success(func):
+    @functools.wraps(func)
+    def wrapper(context):
+        if not context["success"]:
+            return context
+        return func(context)
+    return wrapper
 
 
 def xcom_pull(task_id: str, key: str) -> Any:
@@ -36,21 +46,24 @@ class Context(TypedDict, total=False):
     tenant: str
     success: bool
     error: Optional[str]
+    stage: Optional[str]
     value: Optional[Any]
     retention: Optional[int]
 
-def success(context: Context, value: Any = None) -> Context:
+def success(context: Context, stage: str, value: Any = None) -> Context:
     return Context(
         tenant=context["tenant"],
         success=True,
+        stage=stage,
         value=value if value else context.get("value"),
         retention=context.get("retention"),
     )
 
-def failure(context: Context, error: Any = None) -> Context:
+def failure(context: Context, stage: str, error: Any = None) -> Context:
     return Context(
         tenant=context["tenant"],
         success=False,
+        stage=stage,
         error=error if error else context.get("error"),
         retention=context.get("retention"),
     )
@@ -84,13 +97,14 @@ def wiwip_dag():
             grouped = []
             for k, v in results.items():
                 xcom_push(k, v)
-                grouped.append(Context(tenant=k, success=True))
+                grouped.append(Context(tenant=k, stage="fetch_and_group_indices", success=True))
             return grouped
 
         return group_by_tenant(fetch(hook))
 
     @task_group
     def ilm_settings(hook: HttpHook, upstream: List[Context]) -> List[Context]:
+        tg_stage = "ilm_settings"
         @task
         def fetch(h: HttpHook) -> bool:
             results = fetch_from_endpoint(h, "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias")
@@ -98,6 +112,7 @@ def wiwip_dag():
             return True
 
         @task
+        @chain_on_success
         def verify(c: Context) -> Context:
             indices = xcom_pull("fetch_and_group_indices.group_by_tenant", c["tenant"])
             il_list = []
@@ -108,26 +123,26 @@ def wiwip_dag():
                     print(f"No settings for {index}")
 
             if any("name" not in il for il in il_list):
-                return failure(context=c, error=f"Invalid policies: {il_list}")
+                return failure(context=c, stage=tg_stage, error=f"Invalid policies: {il_list}")
 
             policies = set(il["name"] for il in il_list)
             if not all(p in POLICY_MAPPING for p in policies):
-                return failure(context=c, error=f"Invalid policies: {policies}")
+                return failure(context=c, stage=tg_stage, error=f"Invalid policies: {policies}")
 
             if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-                return failure(context=c, error=f"Retention period is not unique: {policies}")
+                return failure(context=c, stage=tg_stage, error=f"Retention period is not unique: {policies}")
 
             if any("rollover_alias" not in il for il in il_list):
-                return failure(context=c,
+                return failure(context=c, stage=tg_stage,
                                error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
 
             rollover = set(il["rollover_alias"] for il in il_list)
             if not all(a == f"{c['tenant']}-rollover" for a in rollover):
-                return failure(context=c, error=f"Invalid rollover alias {rollover}")
+                return failure(context=c, stage=tg_stage, error=f"Invalid rollover alias {rollover}")
 
             retention = next(iter(set(POLICY_MAPPING.get(p) for p in policies)))
 
-            return Context(tenant=c["tenant"], success=True, retention=retention)
+            return Context(tenant=c["tenant"], stage=tg_stage, success=True, retention=retention)
 
         f = fetch(hook)
         v = verify.expand(c=upstream)
@@ -136,6 +151,7 @@ def wiwip_dag():
 
     @task_group
     def index_templates(hook: HttpHook, upstream: List[Context]) -> List[Context]:
+        tg_stage = "index_templates"
         @task
         def fetch(h: HttpHook) -> bool:
             results = fetch_from_endpoint(h, "/_index_template/*-rollover")
@@ -146,14 +162,15 @@ def wiwip_dag():
             return True
 
         @task
+        @chain_on_success
         def verify(c: Context) -> Context:
             index_template = xcom_pull("index_templates.fetch", f'{c["tenant"]}-rollover')
             _ = index_template.pop("composed_of")
 
             if index_template != expected_index_template(tenant=c["tenant"], retention_months=c["retention"]):
-                return failure(context=c, error=f"Invalid index template: {index_template}")
+                return failure(context=c, stage=tg_stage, error=f"Invalid index template: {index_template}")
 
-            return success(context=c)
+            return success(context=c, stage=tg_stage)
 
         f = fetch(hook)
         v = verify.expand(c=upstream)
@@ -162,19 +179,23 @@ def wiwip_dag():
 
     @task_group
     def monthly_indices(hook: HttpHook, upstream: List[Context]) -> List[Context]:
+        tg_stage = "monthly_indices"
+
         @task
+        @chain_on_success
         def verify(c: Context) -> Context:
             indices = xcom_pull("fetch_and_group_indices.group_by_tenant", c["tenant"])
 
             for month_start in generate_past_month_starts(c["retention"]):
                 if not [index for index in indices if f'{c["tenant"]}-{month_start:%Y-%m-%d}' in index]:
-                    return failure(context=c, error="Missing index")
-            return success(context=c)
+                    return failure(context=c, stage=tg_stage, error="Missing index")
+            return success(context=c, stage=tg_stage)
         v = verify.expand(c=upstream)
         return v
 
     @task_group
     def aliases(hook: HttpHook, upstream: List[Context]) -> List[Context]:
+        tg_stage = "aliases"
         @task
         def fetch(h: HttpHook) -> bool:
             results = fetch_from_endpoint(h, "/_aliases")
@@ -182,6 +203,7 @@ def wiwip_dag():
             return True
 
         @task
+        @chain_on_success
         def verify(c: Context) -> Context:
             indices = xcom_pull("refetch_and_group_indices.group_by_tenant", c["tenant"])
 
@@ -193,12 +215,17 @@ def wiwip_dag():
                 aa = xcom_pull("aliases.fetch", index)
                 if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in
                             aa["aliases"].keys()]):
-                    return failure(context=c, error="Alias not complete")
-            return success(context=c)
+                    return failure(context=c, stage=tg_stage, error="Alias not complete")
+            return success(context=c, stage=tg_stage)
         f = fetch(hook)
         v = verify.expand(c=upstream)
         f >> v
         return v
+
+    @task
+    def print_all(upstream: List[Context]) -> None:
+        for c in upstream:
+            print(json.dumps(c, indent=2))
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     t1 = fetch_and_group_indices(hook=hook_get)
