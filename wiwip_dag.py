@@ -16,7 +16,7 @@ from repo.utils import *
     catchup=False,
 )
 def wiwip_dag():
-    def _filter_and_push(results, filter_fn = lambda _: True) -> Result:
+    def _filter_and_push(results, filter_fn = lambda _: True) -> List[Result]:
         filtered = []
         for k, v in results.items():
             if filter_fn(k):
@@ -49,7 +49,7 @@ def wiwip_dag():
             return _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
 
         @task
-        def verify(data: Result):
+        def verify(data: Result) -> Result:
             tenant = data["key"]
             indices = xcom_pull("fetch_and_group_indices.group_by_tenant", tenant)
             il_list = []
@@ -90,11 +90,39 @@ def wiwip_dag():
         f = fetch(hook)
         v = verify.expand(data=upstream)
         f >> v
+        return v
 
+    @task_group
+    def index_templates(hook: HttpHook, upstream: List[Result]) -> List[Result]:
+        @task
+        def fetch(h: HttpHook) -> List[Result]:
+            results = fetch_from_endpoint(h, "/_index_template/*-rollover")
+            return _filter_and_push(
+                {r["name"]: r["index_template"] for r in results["index_templates"]},
+                lambda x: ALIAS_REGEX_MAPPING["rollover"].match(x),
+            )
 
+        @task
+        @chain_on_success
+        def verify(data: Result) -> Result:
+            tenant = data["key"]
+            settings = xcom_pull("ilm_settings.verify", tenant)
+            index_template = xcom_pull("index_templates.fetch", settings["rollover_alias"])
+            _ = index_template.pop("composed_of")
+
+            if index_template != expected_index_template(tenant=tenant, retention_months=settings["retention"]):
+                return failure(key=tenant, error=f"Invalid index template: {index_template}")
+
+            xcom_push(key=tenant, value=index_template)
+            return success(key=tenant, value=index_template)
+
+        f = fetch(hook)
+        v = verify.expand(data=upstream)
+        f >> v
+        return v
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
-    ilm_settings(hook=hook_get, upstream=fetch_and_group_indices(hook=hook_get))
+    index_templates(hook=hook_get, upstream=ilm_settings(hook=hook_get, upstream=fetch_and_group_indices(hook=hook_get)))
 
 wiwip_dag()
