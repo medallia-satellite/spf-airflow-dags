@@ -134,15 +134,10 @@ def wip_dag():
             indices = retrieve("group_indices", tenant)
             s = xcom_pull("validate.ilm_settings", tenant)[0]
             current_month = generate_past_month_starts(s["retention"])[0]
-            expected = {
-                tenant: {'is_write_index': False},
-                f"{tenant}-{current_month:%Y-%m-%d}": {'is_write_index': True},
-                s["rollover_alias"]: {'is_write_index': True},
-
-            }
+            current_month_alias = f"{tenant}-{current_month:%Y-%m-%d}"
             for index in indices:
                 aliases = xcom_pull("fetch.aliases", index)
-                if aliases == expected:
+                if current_month_alias in aliases and aliases[current_month_alias]["is_write_index"]:
                     return success(key=tenant, value=None)
             return failure(key=tenant, error="Rollover alias misconfigured")
 
@@ -213,10 +208,10 @@ def wip_dag():
             current_month = generate_past_month_starts(s["retention"])[0]
 
             indices = retrieve("group_indices", tenant)
-            current_month = f"{tenant}-{current_month:%Y-%m-%d}"
+            current_month_alias = f"{tenant}-{current_month:%Y-%m-%d}"
             for index in indices:
                 aliases = xcom_pull("fetch.aliases", index)["aliases"]
-                if current_month in aliases and aliases[current_month]["is_write_index"]:
+                if current_month_alias in aliases and aliases[current_month_alias]["is_write_index"]:
                     actions.append({
                         "add": {
                             "index": index,
