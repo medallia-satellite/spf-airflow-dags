@@ -106,7 +106,7 @@ def wiwip_dag():
         @chain_on_success
         def verify(data: Result) -> Result:
             tenant = data["key"]
-            settings = xcom_pull("ilm_settings.verify", tenant)
+            settings = xcom_pull("ilm_settings.verify", tenant)[0]
             index_template = xcom_pull("index_templates.fetch", settings["rollover_alias"])
             _ = index_template.pop("composed_of")
 
@@ -122,7 +122,8 @@ def wiwip_dag():
         return v
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
-
-    index_templates(hook=hook_get, upstream=ilm_settings(hook=hook_get, upstream=fetch_and_group_indices(hook=hook_get)))
+    t1 = fetch_and_group_indices(hook=hook_get)
+    t2 = ilm_settings(hook=hook_get, upstream=t1)
+    t3 = index_templates(hook=hook_get, upstream=t2)
 
 wiwip_dag()
