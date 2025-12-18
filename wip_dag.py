@@ -190,8 +190,8 @@ def wip_dag():
 
         t1 = ilm_settings.expand(data=upstream)
         t2 = index_templates.expand(data=t1)
-        t3 = monthly_aliases.expand(data=t2)
-        t4 = monthly_indices.expand(data=t2)
+        t3 = monthly_indices.expand(data=t2)
+        t4 = monthly_aliases.expand(data=t3)
         t5 = rollover_aliases.expand(data=t4)
         return categorize_errors(t1, t2, t3, t4, t5)
 
@@ -252,9 +252,9 @@ def wip_dag():
                 active_indices += [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]
 
             for index in active_indices:
-                aliases = xcom_pull("fetch.aliases", index)
-                if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in aliases["aliases"].keys()]):
-                    print(f"{aliases['aliases'].keys()}")
+                aliases = xcom_pull("fetch.aliases", index)["aliases"]
+                if not all([alias in aliases.keys() for alias in generate_aliases(index).values()]):
+                    print(f"Fixing {index}: {aliases}")
 
             return success(key=tenant, value=None)
 
@@ -275,12 +275,17 @@ def wip_dag():
             for month_start in generate_past_month_starts(num_months):
                 if not [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]:
                     index = f"{tenant}-{month_start:%Y-%m-%d}-{tenant_id}-0"
+                    aliases = generate_aliases(index)
                     origination_date = month_start.timestamp()
                     payload = {
                         "settings": {"index.lifecycle.origination_date": origination_date},
-                        "aliases": generate_aliases(index)
+                        "aliases": {
+                            aliases["read"]: {"is_write_index" : False},
+                            aliases["write"]: {"is_write_index": True},
+                            aliases["rollover"]: {"is_write_index": False},
+                        }
                     }
-                    print(f"{index}: {payload}")
+                    print(f"Fixing {index}: {payload}")
             return success(key=tenant, value=None)
         return fix.expand(data=extract(upstream))
 
