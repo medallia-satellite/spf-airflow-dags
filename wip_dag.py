@@ -206,7 +206,34 @@ def wip_dag():
             return data["rollover_aliases"]
         @task
         def fix(data):
-            print(data)
+            actions = []
+            # get all indices and then look for rollover write and then gen the proper action
+            tenant = data
+            s = xcom_pull("validate.ilm_settings", tenant)[0]
+            current_month = generate_past_month_starts(s["retention"])[0]
+
+            indices = retrieve("group_indices", tenant)
+            current_month = f"{tenant}-{current_month:%Y-%m-%d}"
+            for index in indices:
+                aliases = xcom_pull("fetch.aliases", index)["aliases"]
+                if {'is_write_index': True} in aliases.get(current_month, []):
+                    actions.append({
+                        "add": {
+                            "index": index,
+                            "alias": s["rollover_alias"],
+                            "is_write_index": True
+                        }
+                    })
+                elif {'is_write_index': True} in aliases.get(f"{tenant}-rollover", []):
+                    actions.append({
+                        "add": {
+                            "index": index,
+                            "alias": s["rollover_alias"],
+                            "is_write_index": False
+                        }
+                    })
+            print(json.dumps(actions, indent=2))
+
         return fix.expand(data=extract(upstream))
 
     @task_group
@@ -279,19 +306,14 @@ def wip_dag():
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
-    f = fetch(hook=hook_get)
-    fgi = group_indices(f)
-    v = validate(fgi)
-    fix_ilm_settings(v)
-    fix_index_templates(v)
-    fix_monthly_indices(v)
-    fix_monthly_aliases(v)
-    fix_rollover_aliases(v)
-    return v
-    # validated = validate_monthly_indices_and_aliases(index_templates(upstream=ilm_settings(upstream=fgi)))
-    #
-    # indices_with_missing_aliases(validated)
-    # add_missing_months(validated)
-
+    f_tg = fetch(hook=hook_get)
+    grouped = group_indices(f_tg)
+    validated = validate(grouped)
+    fix_ilm_settings(validated)
+    fix_index_templates(validated)
+    fix_monthly_indices(validated)
+    fix_monthly_aliases(validated)
+    fix_rollover_aliases(validated)
+    return validated
 
 wip_dag()
