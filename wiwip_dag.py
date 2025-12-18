@@ -146,7 +146,7 @@ def wiwip_dag():
 
             retention = next(iter(set(POLICY_MAPPING.get(p) for p in policies)))
 
-            return Context(tenant=context["tenant"], stage=tg_stage, success=True, retention=retention)
+            return Context(tenant=context["tenant"], tenant_id=context["tenant_id"], stage=tg_stage, success=True, retention=retention)
 
         f = fetch(hook)
         v = verify.expand(context=upstream)
