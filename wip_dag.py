@@ -137,6 +137,7 @@ def wip_dag():
             current_month_alias = f"{tenant}-{current_month:%Y-%m-%d}"
             for index in indices:
                 aliases = xcom_pull("fetch.aliases", index)
+                print(aliases)
                 if current_month_alias in aliases and aliases[current_month_alias]["is_write_index"]:
                     return success(key=tenant, value=None)
             return failure(key=tenant, error="Rollover alias misconfigured")
