@@ -178,7 +178,7 @@ def wiwip_dag():
     t2 = ilm_settings(hook=hook_get, upstream=t1)
     t3 = index_templates(hook=hook_get, upstream=t2)
     t4 = monthly_indices(hook=hook_get, upstream=t3)
-    t5 = fetch_and_group_indices.override(task_id="refetch_and_group_indices")(hook=hook_get)
+    t5 = fetch_and_group_indices.override(task_group_id="refetch_and_group_indices")(hook=hook_get)
     t4 >> t5
     t6 = monthly_indices(hook=hook_get, upstream=t4)
     t5 >> t6
