@@ -8,26 +8,29 @@ from repo.fix_and_verify import *
 from repo.utils import *
 
 
-@task(task_id="fetch")
-def fetch_aliases(hook: HttpHook):
+def xcom_pull(task_id: str, key: str) -> Any:
+    context = get_current_context()
+    ti = context["ti"]
+    print(f"xcom_pull {task_id} {key}")
+    return ti.xcom_pull(task_ids=task_id, key=key)
+
+def xcom_push(key: str, value: Any) -> None:
+    context = get_current_context()
+    ti = context["ti"]
+    print(f"xcom_push {key} {value}")
+    ti.xcom_push(key, value)
+
+
+def fetch_from_endpoint(hook: HttpHook, endpoint: str):
     response = hook.run(
-        endpoint='/_cat/aliases?h=alias,index,is_write_index',
+        endpoint=endpoint,
         headers={'Accept': 'application/json'},
     )
     hook.check_response(response)
-    return [r for r in response.json() if BASE_REGEX.match(r["alias"])]
+    return response.json()
 
 
-@task(task_id="fetch")
-def fetch_indices(hook: HttpHook):
-    response = hook.run(
-        endpoint='/_cat/indices?h=index&format=json',
-        headers={'Accept': 'application/json'},
-    )
-    hook.check_response(response)
-    return [r["index"] for r in response.json() if INDEX_REGEX.match(r["index"])]
-
-
+#########################################
 @task(task_id="fetch")
 def fetch_alias_settings(hook: HttpHook, data: Result):
     alias = data["key"]
@@ -42,7 +45,7 @@ def fetch_alias_settings(hook: HttpHook, data: Result):
 
 
 @task(task_id="fetch")
-def fetch_index_templates(hook: HttpHook, data: Result):
+def fetch_index_template(hook: HttpHook, data: Result):
     index_template = f'{data["key"]}-rollover'
     response = hook.run(
         endpoint=f'/_index_template/{index_template}',
