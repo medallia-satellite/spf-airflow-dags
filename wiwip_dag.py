@@ -156,7 +156,7 @@ def wiwip_dag():
             return success(context=c)
 
         f = fetch(hook)
-        v = verify.expand(data=upstream)
+        v = verify.expand(c=upstream)
         f >> v
         return v
 
@@ -170,7 +170,7 @@ def wiwip_dag():
                 if not [index for index in indices if f'{c["tenant"]}-{month_start:%Y-%m-%d}' in index]:
                     return failure(context=c, error="Missing index")
             return success(context=c)
-        v = verify.expand(data=upstream)
+        v = verify.expand(c=upstream)
         return v
 
     @task_group
@@ -196,7 +196,7 @@ def wiwip_dag():
                     return failure(context=c, error="Alias not complete")
             return success(context=c)
         f = fetch(hook)
-        v = verify.expand(data=upstream)
+        v = verify.expand(c=upstream)
         f >> v
         return v
 
