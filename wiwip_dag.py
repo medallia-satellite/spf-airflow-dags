@@ -145,10 +145,43 @@ def wiwip_dag():
         v = verify.expand(data=e)
         return v
 
+    @task_group
+    def aliases(hook: HttpHook, upstream: List[Result]) -> List[Result]:
+        @task
+        def fetch(h: HttpHook) -> List[Result]:
+            results = fetch_from_endpoint(h, "/_aliases")
+            return _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
+        @task
+        def verify(data: Result) -> Result:
+            tenant = data["key"]
+            indices = xcom_pull("refetch_and_group_indices.group_by_tenant", tenant)
+            num_months = xcom_pull("ilm_settings.verify", tenant)["retention"]
+
+            active_indices = []
+            for month_start in generate_past_month_starts(num_months):
+                active_indices += [index for index in indices if f"{tenant}-{month_start:%Y-%m-%d}" in index]
+
+            for index in active_indices:
+                aa = xcom_pull("aliases.fetch", index)
+                if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in
+                            aa["aliases"].keys()]):
+                    return failure(key=tenant, error="Alias not complete")
+
+            return success(key=tenant, value=None)
+        f = fetch(hook)
+        e = extract_success(data=upstream)
+        v = verify.expand(data=e)
+        f >> v
+        return v
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     t1 = fetch_and_group_indices(hook=hook_get)
     t2 = ilm_settings(hook=hook_get, upstream=t1)
     t3 = index_templates(hook=hook_get, upstream=t2)
     t4 = monthly_indices(hook=hook_get, upstream=t3)
+    t5 = fetch_and_group_indices(hook=hook_get).override(task_id="refetch_and_group_indices")
+    t4 >> t5
+    t6 = monthly_indices(hook=hook_get, upstream=t4)
+    t5 >> t6
+
 
 wiwip_dag()
