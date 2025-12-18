@@ -256,7 +256,7 @@ def wiwip_dag():
     t2 = ilm_settings(hook=hook_get, upstream=t1)
     t3 = index_templates(hook=hook_get, upstream=t2)
     t4 = monthly_indices(hook=hook_get, upstream=t3)
-    t4_fixed = add_missing_indices.partal(hook=hook_get).expand(context=t4)
+    t4_fixed = add_missing_indices.partial(hook=hook_get).expand(context=t4)
     t5 = fetch_and_group_indices.override(group_id="refetch_and_group_indices")(hook=hook_get)
     t4_fixed >> t5
     t6 = monthly_indices(hook=hook_get, upstream=t4_fixed)
