@@ -17,10 +17,12 @@ from repo.utils import *
 )
 def wiwip_dag():
     def _filter_and_push(results, filter_fn = lambda _: True) -> Result:
+        filtered = []
         for k, v in results.items():
             if filter_fn(k):
                 xcom_push(k, v)
-        return success("all", list(results.keys()))
+                filtered.append(success(key=k, value=None))
+        return filtered
 
     @task_group
     def fetch_and_group_indices(hook: HttpHook):
