@@ -85,6 +85,11 @@ def wiwip_dag():
 
             return success(key=tenant, value=None)
 
+        f = fetch(hook)
+        v = verify.expand(data=upstream)
+        f >> v
+
+
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
