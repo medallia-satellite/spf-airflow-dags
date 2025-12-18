@@ -43,16 +43,16 @@ def success(context: Context, value: Any = None) -> Context:
     return Context(
         tenant=context["tenant"],
         success=True,
-        value=value if value else context["value"],
-        retention=context["retention"],
+        value=value if value else context.get("value"),
+        retention=context.get("retention"),
     )
 
 def failure(context: Context, error: Any = None) -> Context:
     return Context(
         tenant=context["tenant"],
         success=False,
-        error=error if error else context["value"],
-        retention=context["retention"],
+        error=error if error else context.get("error"),
+        retention=context.get("retention"),
     )
 
 @dag(
