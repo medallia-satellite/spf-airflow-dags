@@ -88,14 +88,6 @@ def wiwip_dag():
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
 
-    f_tg = fetch(hook=hook_get)
-    grouped = group_indices(f_tg)
-    validated = validate(grouped)
-    fix_ilm_settings(validated)
-    fix_index_templates(validated)
-    fix_monthly_indices(validated)
-    fix_monthly_aliases(validated)
-    fix_rollover_aliases(validated)
-    return validated
+    ilm_settings(hook=hook_get, upstream=fetch_and_group_indices(hook=hook_get))
 
-wip_dag()
+wiwip_dag()
