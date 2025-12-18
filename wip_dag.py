@@ -136,7 +136,7 @@ def wip_dag():
             current_month = generate_past_month_starts(s["retention"])[0]
             current_month_alias = f"{tenant}-{current_month:%Y-%m-%d}"
             for index in indices:
-                aliases = xcom_pull("fetch.aliases", index)
+                aliases = xcom_pull("fetch.aliases", index)["aliases"]
                 print(aliases)
                 if current_month_alias in aliases and aliases[current_month_alias]["is_write_index"]:
                     return success(key=tenant, value=None)
