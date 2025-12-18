@@ -1,5 +1,6 @@
 import functools
 import json
+import pprint
 from collections import defaultdict
 from typing import TypedDict, Optional, Any, List
 
@@ -252,7 +253,7 @@ def wiwip_dag():
     @task
     def print_all(upstream: List[Context]) -> None:
         for c in upstream:
-            print(json.dumps(c, indent=2))
+            pprint.pprint(c)
 
     hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
     t1 = fetch_and_group_indices(hook=hook_get)
