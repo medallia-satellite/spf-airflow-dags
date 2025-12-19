@@ -205,7 +205,7 @@ def wiwip_dag():
 
             return success(context=context, stage="add_missing_indices")
 
-        return fix.partial(conn_id=conn_id).expand(context=verify.expand(context=upstream))
+        return fix.partial(c=conn_id).expand(context=verify.expand(context=upstream))
 
     @task_group
     def aliases(conn_id: str, upstream: List[Context]) -> List[Context]:
