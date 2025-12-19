@@ -189,38 +189,38 @@ def wiwip_dag():
             if missing:
                 return failure(context=context, stage=tg_stage, error=missing)
             return success(context=context, stage=tg_stage)
-        v = verify.expand(context=upstream)
-        return v
 
-    @task
-    def add_missing_indices(hook: HttpHook, context: Context) -> Context:
-        if context["success"] or context["stage"] != "monthly_indices":
-            return context
+        @task
+        def fix(hook: HttpHook, context: Context) -> Context:
+            if context["success"] or context["stage"] != "monthly_indices":
+                return context
 
-        for month_start in context["error"]:
-            index = f'{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-0'
-            aliases = generate_aliases(index)
-            origination_date = month_start.timestamp()
-            payload = {
-                "settings": {"index.lifecycle.origination_date": origination_date},
-                "aliases": {
-                    aliases["read"]: {"is_write_index": False},
-                    aliases["write"]: {"is_write_index": True},
-                    aliases["rollover"]: {"is_write_index": False},
+            for month_start in context["error"]:
+                index = f'{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-0'
+                aliases = generate_aliases(index)
+                origination_date = month_start.timestamp()
+                payload = {
+                    "settings": {"index.lifecycle.origination_date": origination_date},
+                    "aliases": {
+                        aliases["read"]: {"is_write_index": False},
+                        aliases["write"]: {"is_write_index": True},
+                        aliases["rollover"]: {"is_write_index": False},
+                    }
                 }
-            }
-            print(f"Fixing {index}: {payload}")
+                print(f"Fixing {index}: {payload}")
 
-        return success(context=context, stage="add_missing_indices")
+            return success(context=context, stage="add_missing_indices")
+
+        return fix.partial(hook=hook).expand(context=verify.expand(context=upstream))
 
     @task_group
     def aliases(hook: HttpHook, upstream: List[Context]) -> List[Context]:
         tg_stage = "aliases"
         @task
-        def fetch(h: HttpHook) -> bool:
+        def fetch(h: HttpHook, data: List[Context]) -> bool:
             results = fetch_from_endpoint(h, "/_aliases")
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
-            return True
+            return data
 
         @task
         @chain_on_success
@@ -237,9 +237,7 @@ def wiwip_dag():
                             aa["aliases"].keys()]):
                     return failure(context=context, stage=tg_stage, error="Alias not complete")
             return success(context=context, stage=tg_stage)
-        f = fetch(hook)
-        v = verify.expand(context=upstream)
-        f >> v
+        v = verify.expand(context=fetch(hook, upstream))
         return v
 
     @task
@@ -252,8 +250,7 @@ def wiwip_dag():
     t2 = ilm_settings(hook=hook_get, upstream=t1)
     t3 = index_templates(hook=hook_get, upstream=t2)
     t4 = monthly_indices(hook=hook_get, upstream=t3)
-    t4_fixed = add_missing_indices.partial(hook=hook_get).expand(context=t4)
-    t5 = monthly_indices(hook=hook_get, upstream=t4_fixed)
+    t5 = aliases(hook=hook_get, upstream=t4)
     print_all(upstream=t5)
 
 
