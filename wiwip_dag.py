@@ -195,7 +195,7 @@ def wiwip_dag():
             for month_start in context["error"]:
                 index = f'{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-0'
                 aliases = generate_aliases(index)
-                origination_date = month_start.timestamp()
+                origination_date = int(month_start.timestamp() * 1e3)
                 payload = {
                     "settings": {"index.lifecycle.origination_date": origination_date},
                     "aliases": {
