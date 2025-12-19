@@ -37,6 +37,17 @@ def generate_past_month_starts(n):
                            + relativedelta(months=1))
     return [current_month_start - relativedelta(months=i) for i in range(n)]
 
+
+def http_hook_put(conn_id: str, endpoint: str, data: str):
+    hook_put = HttpHook(method='PUT', http_conn_id=conn_id)
+    response = hook_put.run(
+        endpoint=f'/{endpoint}?pretty',
+        headers={'Content-Type': 'application/json'},
+        data=data
+    )
+    hook_put.check_response(response)
+    return response.json()
+
 def fetch_from_endpoint(conn_id: str, endpoint: str):
     hook_get = HttpHook(method='GET', http_conn_id=conn_id)
     response = hook_get.run(
@@ -84,7 +95,7 @@ def failure(context: Context, stage: str, error: Any = None) -> Context:
     description="This DAG verifies monthly indices.",
     max_active_runs=1,
     catchup=False,
-    params={"db_conn": Param("es-wordtags", type="string")},
+    params={"db_conn": Param("es-testing", type="string")},
 
 )
 def wiwip_dag():
@@ -217,7 +228,8 @@ def wiwip_dag():
                         aliases["rollover"]: {"is_write_index": False},
                     }
                 }
-                print(f"Fixing {index}: {payload}")
+                response = http_hook_put(c, index, json.dumps(payload))
+                print(f"{index}: {response}")
 
             return success(context=context, stage="add_missing_indices")
 
