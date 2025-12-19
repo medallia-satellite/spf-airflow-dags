@@ -48,7 +48,7 @@ def http_hook_put(conn_id: str, endpoint: str, data: str):
     hook_put.check_response(response)
     return response.json()
 
-def fetch_from_endpoint(conn_id: str, endpoint: str):
+def http_hook_get(conn_id: str, endpoint: str):
     hook_get = HttpHook(method='GET', http_conn_id=conn_id)
     response = hook_get.run(
         endpoint=endpoint,
@@ -114,7 +114,7 @@ def wiwip_dag():
 
     @task
     def fetch_indices_per_tenant(conn_id: str, stage: str = "") -> List[Context]:
-        fetched = fetch_from_endpoint(conn_id, "/_cat/indices?h=index&format=json")
+        fetched = http_hook_get(conn_id, "/_cat/indices?h=index&format=json")
         print(fetched)
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
@@ -133,7 +133,7 @@ def wiwip_dag():
         tg_stage = "ilm_settings"
         @task
         def fetch(h: str) -> bool:
-            results = fetch_from_endpoint(h, "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias")
+            results = http_hook_get(h, "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias")
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
             return True
 
@@ -171,7 +171,7 @@ def wiwip_dag():
         tg_stage = "index_templates"
         @task
         def fetch(h: str) -> bool:
-            results = fetch_from_endpoint(h, "/_index_template/*-rollover")
+            results = http_hook_get(h, "/_index_template/*-rollover")
             _filter_and_push(
                 {r["name"]: r["index_template"] for r in results["index_templates"]},
                 lambda x: ALIAS_REGEX_MAPPING["rollover"].match(x),
@@ -217,7 +217,7 @@ def wiwip_dag():
                 return context
 
             for month_start in context["error"]:
-                index = f'{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-0'
+                index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-0'
                 aliases = generate_aliases(index)
                 origination_date = int(month_start.timestamp() * 1e3)
                 payload = {
@@ -243,7 +243,7 @@ def wiwip_dag():
         tg_stage = "aliases"
         @task
         def fetch(h: str, data: List[Context]) -> List[Context]:
-            results = fetch_from_endpoint(h, "/_aliases")
+            results = http_hook_get(h, "/_aliases")
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
             return data
 
