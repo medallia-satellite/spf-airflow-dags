@@ -18,7 +18,6 @@ def chain_on_success(func):
         return func(context)
     return wrapper
 
-
 def xcom_pull(task_id: str, key: str) -> Any:
     context = get_current_context()
     ti = context["ti"]
@@ -32,7 +31,9 @@ def xcom_push(key: str, value: Any) -> None:
     ti.xcom_push(key, value)
 
 def generate_past_month_starts(n):
-    current_month_start = datetime.datetime.today().replace(day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc) + relativedelta(months=1)
+    current_month_start = (datetime.datetime.today()
+                           .replace(day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc)
+                           + relativedelta(months=1))
     return [current_month_start - relativedelta(months=i) for i in range(n)]
 
 def fetch_from_endpoint(hook: HttpHook, endpoint: str):
@@ -122,26 +123,23 @@ def wiwip_dag():
             indices = xcom_pull("fetch_and_group_indices.group_by_tenant", context["tenant"])
             il_list = []
             for index in indices:
-                if s := xcom_pull("ilm_settings.fetch", index):
-                    il_list.append(s["settings"]["index"]["lifecycle"])
-                else:
-                    print(f"No settings for {index}")
+                # if s := xcom_pull("ilm_settings.fetch", index):
+                #     il_list.append(s["settings"]["index"]["lifecycle"])
+                # else:
+                #     print(f"No settings for {index}")
+                s = xcom_pull("ilm_settings.fetch", index)
+                il_list.append(s["settings"]["index"]["lifecycle"])
+            # if any("name" not in il for il in il_list):
+            #     return failure(context=context, stage=tg_stage, error=f"Invalid policies: {il_list}")
 
-            if any("name" not in il for il in il_list):
-                return failure(context=context, stage=tg_stage, error=f"Invalid policies: {il_list}")
-
-            policies = set(il["name"] for il in il_list)
+            policies = set(il.get("name") for il in il_list)
             if not all(p in POLICY_MAPPING for p in policies):
                 return failure(context=context, stage=tg_stage, error=f"Invalid policies: {policies}")
 
             if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
                 return failure(context=context, stage=tg_stage, error=f"Retention period is not unique: {policies}")
 
-            if any("rollover_alias" not in il for il in il_list):
-                return failure(context=context, stage=tg_stage,
-                               error=f"No rollover alias {[il for il in il_list if 'rollover_alias' not in il]}")
-
-            rollover = set(il["rollover_alias"] for il in il_list)
+            rollover = set(il.get("rollover_alias") for il in il_list)
             if not all(a == f"{context['tenant']}-rollover" for a in rollover):
                 return failure(context=context, stage=tg_stage, error=f"Invalid rollover alias {rollover}")
 
@@ -261,11 +259,8 @@ def wiwip_dag():
     t3 = index_templates(hook=hook_get, upstream=t2)
     t4 = monthly_indices(hook=hook_get, upstream=t3)
     t4_fixed = add_missing_indices.partial(hook=hook_get).expand(context=t4)
-    t5 = fetch_and_group_indices.override(group_id="refetch_and_group_indices")(hook=hook_get)
-    t4_fixed >> t5
-    t6 = monthly_indices(hook=hook_get, upstream=t4_fixed)
-    t5 >> t6
-    print_all(upstream=t6)
+    t5 = monthly_indices(hook=hook_get, upstream=t4_fixed)
+    print_all(upstream=t5)
 
 
 wiwip_dag()
