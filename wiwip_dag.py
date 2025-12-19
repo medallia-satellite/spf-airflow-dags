@@ -105,8 +105,16 @@ def wiwip_dag():
                 xcom_push(k, v)
 
     @task
-    def extract_success(upstream: List[Context], stage: str) -> List[Context]:
-        return [c for c in upstream if c["success"] or c["stage"] != stage]
+    def report(upstream: List[Context]) -> List[Context]:
+        errors = [x for x in upstream if not x["success"]]
+        print(f"""
+        success: {len(upstream) - len(errors)}/{len(upstream)}
+        errors: {len([x for x in upstream if not x["success"]])}/{len(upstream)}:
+        """)
+        for e in errors:
+            pprint.pprint(e)
+
+        return upstream
 
     @task
     def extract_errors(upstream: List[Context], stage: str) -> List[Context]:
@@ -233,10 +241,7 @@ def wiwip_dag():
 
             return success(context=context, stage="add_missing_indices")
 
-        verified = verify.expand(context=upstream)
-        successes =extract_success(verified, tg_stage)
-        errors = extract_errors(verified, tg_stage)
-        return successes.concat(fix.partial(c=conn_id).expand(context=errors))
+        return fix.partial(c=conn_id).expand(context=report(verify.expand(context=upstream)))
 
     @task_group
     def aliases(conn_id: str, upstream: List[Context]) -> List[Context]:
