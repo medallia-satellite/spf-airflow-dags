@@ -109,7 +109,7 @@ def wiwip_dag():
         errors = [x for x in upstream if not x["success"]]
         print(f"""
         success: {len(upstream) - len(errors)}/{len(upstream)}
-        errors: {len([x for x in upstream if not x["success"]])}/{len(upstream)}:
+        errors: {len([x for x in upstream if not x["success"]])}/{len(upstream)}
         """)
         for e in errors:
             pprint.pprint(e)
@@ -280,8 +280,7 @@ def wiwip_dag():
     t3 = index_templates(conn_id=connection_id, upstream=t2)
     t4 = monthly_indices(conn_id=connection_id, upstream=t3)
     t5 = aliases(conn_id=connection_id, upstream=t4)
-
-    t1 >> t2 >> t3 >> t4 >> t5 >> print_all(upstream=t5)
+    print_all(upstream=t5)
 
 
 wiwip_dag()
