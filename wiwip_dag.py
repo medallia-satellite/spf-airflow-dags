@@ -93,6 +93,7 @@ def wiwip_dag():
     @task
     def fetch_indices_per_tenant(conn_id: str, stage: str = "") -> List[Context]:
         fetched = fetch_from_endpoint(conn_id, "/_cat/indices?h=index&format=json")
+        print(fetched)
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
