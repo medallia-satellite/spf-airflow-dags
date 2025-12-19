@@ -224,7 +224,7 @@ def wiwip_dag():
         verified = verify.expand(context=upstream)
         successes =extract_success(verified, tg_stage)
         errors = extract_errors(verified, tg_stage)
-        return successes + fix.partial(c=conn_id).expand(context=errors)
+        return successes.concat(fix.partial(c=conn_id).expand(context=errors))
 
     @task_group
     def aliases(conn_id: str, upstream: List[Context]) -> List[Context]:
