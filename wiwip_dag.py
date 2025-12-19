@@ -75,6 +75,9 @@ def failure(context: Context, stage: str, error: Any = None) -> Context:
         retention=context.get("retention"),
     )
 
+
+
+
 @dag(
     dag_display_name="WIP2",
     tags=["spf", "test", "poc"],
@@ -89,6 +92,14 @@ def wiwip_dag():
         for k, v in results.items():
             if filter_fn(k):
                 xcom_push(k, v)
+
+    @task
+    def extract_success(upstream: List[Context], stage: str) -> List[Context]:
+        return [c for c in upstream if c["success"] or c["stage"] != stage]
+
+    @task
+    def extract_errors(upstream: List[Context], stage: str) -> List[Context]:
+        return [c for c in upstream if not c["success"] and c["stage"] == stage]
 
     @task
     def fetch_indices_per_tenant(conn_id: str, stage: str = "") -> List[Context]:
@@ -188,6 +199,7 @@ def wiwip_dag():
                 return failure(context=context, stage=tg_stage, error=missing)
             return success(context=context, stage=tg_stage)
 
+
         @task
         def fix(c: str, context: Context) -> Context:
             if context["success"] or context["stage"] != "monthly_indices":
@@ -209,7 +221,10 @@ def wiwip_dag():
 
             return success(context=context, stage="add_missing_indices")
 
-        return fix.partial(c=conn_id).expand(context=verify.expand(context=upstream))
+        verified = verify.expand(context=upstream)
+        successes =extract_success(verified, tg_stage)
+        errors = extract_errors(verified, tg_stage)
+        return successes + fix.partial(c=conn_id).expand(context=errors)
 
     @task_group
     def aliases(conn_id: str, upstream: List[Context]) -> List[Context]:
