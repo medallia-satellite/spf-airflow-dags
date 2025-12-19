@@ -123,29 +123,23 @@ def wiwip_dag():
             indices = xcom_pull("fetch_and_group_indices.group_by_tenant", context["tenant"])
             il_list = []
             for index in indices:
-                # if s := xcom_pull("ilm_settings.fetch", index):
-                #     il_list.append(s["settings"]["index"]["lifecycle"])
-                # else:
-                #     print(f"No settings for {index}")
-                s = xcom_pull("ilm_settings.fetch", index)
-                il_list.append(s["settings"]["index"]["lifecycle"])
-            # if any("name" not in il for il in il_list):
-            #     return failure(context=context, stage=tg_stage, error=f"Invalid policies: {il_list}")
+                if s := xcom_pull("ilm_settings.fetch", index):
+                    il_list.append(s["settings"]["index"]["lifecycle"])
+                else:
+                    print(f"No settings for {index}")
 
-            policies = set(il.get("name") for il in il_list)
-            if not all(p in POLICY_MAPPING for p in policies):
-                return failure(context=context, stage=tg_stage, error=f"Invalid policies: {policies}")
+            if len(indices) != len(il_list):
+                return failure(context=context, stage=tg_stage, error="Some indices are missing ILM settings")
 
-            if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1:
-                return failure(context=context, stage=tg_stage, error=f"Retention period is not unique: {policies}")
+            retention = list(set(POLICY_MAPPING.get(il.get("name")) for il in il_list))
+            if len(retention) != 1 or retention[0] not in POLICY_MAPPING.values():
+                return failure(context=context, stage=tg_stage, error=f'Invalid policies: {set(il.get("name") for il in il_list)}')
 
             rollover = set(il.get("rollover_alias") for il in il_list)
-            if not all(a == f"{context['tenant']}-rollover" for a in rollover):
+            if not all(r == f"{context['tenant']}-rollover" for r in rollover):
                 return failure(context=context, stage=tg_stage, error=f"Invalid rollover alias {rollover}")
 
-            retention = next(iter(set(POLICY_MAPPING.get(p) for p in policies)))
-
-            return Context(tenant=context["tenant"], tenant_id=context["tenant_id"], stage=tg_stage, success=True, retention=retention)
+            return Context(tenant=context["tenant"], tenant_id=context["tenant_id"], stage=tg_stage, success=True, retention=retention[0])
 
         f = fetch(hook)
         v = verify.expand(context=upstream)
