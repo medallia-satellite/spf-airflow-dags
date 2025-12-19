@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import TypedDict, Optional, Any, List
 
 from airflow.decorators import dag, task_group, task
+from airflow.models import Param
 from airflow.operators.python import get_current_context
 from airflow.providers.http.hooks.http import HttpHook
 
@@ -80,6 +81,8 @@ def failure(context: Context, stage: str, error: Any = None) -> Context:
     description="This DAG verifies monthly indices.",
     max_active_runs=1,
     catchup=False,
+    params={"db_conn": Param("es-wordtags", type="string")},
+
 )
 def wiwip_dag():
     def _filter_and_push(results, filter_fn) -> None:
@@ -238,7 +241,7 @@ def wiwip_dag():
     def print_all(upstream: List[Context]) -> None:
         for c in upstream:
             pprint.pprint(c, indent=2)
-    connection_id = "es-wordtags"
+    connection_id = "{{ params.db_conn }}"
     t1 = fetch_indices_per_tenant(conn_id=connection_id)
     t2 = ilm_settings(conn_id=connection_id, upstream=t1)
     t3 = index_templates(conn_id=connection_id, upstream=t2)
