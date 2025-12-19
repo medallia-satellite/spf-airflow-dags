@@ -36,12 +36,13 @@ def generate_past_month_starts(n):
                            + relativedelta(months=1))
     return [current_month_start - relativedelta(months=i) for i in range(n)]
 
-def fetch_from_endpoint(hook: HttpHook, endpoint: str):
-    response = hook.run(
+def fetch_from_endpoint(conn_id: str, endpoint: str):
+    hook_get = HttpHook(method='GET', http_conn_id=conn_id)
+    response = hook_get.run(
         endpoint=endpoint,
         headers={'Accept': 'application/json'},
     )
-    hook.check_response(response)
+    hook_get.check_response(response)
     return response.json()
 
 class Context(TypedDict, total=False):
@@ -86,33 +87,26 @@ def wiwip_dag():
             if filter_fn(k):
                 xcom_push(k, v)
 
-    @task_group
-    def fetch_and_group_indices(hook: HttpHook) -> List[Context]:
-        tg_stage = "fetch_and_group_indices"
-        @task
-        def fetch(h: HttpHook) -> List[str]:
-            results = fetch_from_endpoint(h, "/_cat/indices?h=index&format=json")
-            return [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
+    @task
+    def fetch_indices_per_tenant(conn_id: str, stage: str = "") -> List[Context]:
+        fetched = fetch_from_endpoint(conn_id, "/_cat/indices?h=index&format=json")
+        results = defaultdict(list)
+        for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
+            results[
+                (BASE_REGEX.search(index).group(0), INDEX_REGEX.fullmatch(index).groupdict()["tenant_id"])].append(
+                index)
 
-        @task
-        def group_by_tenant(data: list) -> List[Context]:
-            results = defaultdict(list)
-            for index in data:
-                results[(BASE_REGEX.search(index).group(0), INDEX_REGEX.fullmatch(index).groupdict()["tenant_id"])].append(index)
-
-            grouped = []
-            for k, v in results.items():
-                xcom_push(k[0], v)
-                grouped.append(Context(tenant=k[0], tenant_id=k[1], stage=tg_stage, success=True))
-            return grouped
-
-        return group_by_tenant(fetch(hook))
+        grouped = []
+        for k, v in results.items():
+            xcom_push(k[0], v)
+            grouped.append(Context(tenant=k[0], tenant_id=k[1], stage=stage, success=True))
+        return grouped
 
     @task_group
-    def ilm_settings(hook: HttpHook, upstream: List[Context]) -> List[Context]:
+    def ilm_settings(conn_id: str, upstream: List[Context]) -> List[Context]:
         tg_stage = "ilm_settings"
         @task
-        def fetch(h: HttpHook) -> bool:
+        def fetch(h: str) -> bool:
             results = fetch_from_endpoint(h, "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias")
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
             return True
@@ -120,7 +114,7 @@ def wiwip_dag():
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
-            indices = xcom_pull("fetch_and_group_indices.group_by_tenant", context["tenant"])
+            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
             il_list = []
             for index in indices:
                 if s := xcom_pull("ilm_settings.fetch", index):
@@ -141,16 +135,16 @@ def wiwip_dag():
 
             return Context(tenant=context["tenant"], tenant_id=context["tenant_id"], stage=tg_stage, success=True, retention=retention[0])
 
-        f = fetch(hook)
+        f = fetch(conn_id)
         v = verify.expand(context=upstream)
         f >> v
         return v
 
     @task_group
-    def index_templates(hook: HttpHook, upstream: List[Context]) -> List[Context]:
+    def index_templates(conn_id: str, upstream: List[Context]) -> List[Context]:
         tg_stage = "index_templates"
         @task
-        def fetch(h: HttpHook) -> bool:
+        def fetch(h: str) -> bool:
             results = fetch_from_endpoint(h, "/_index_template/*-rollover")
             _filter_and_push(
                 {r["name"]: r["index_template"] for r in results["index_templates"]},
@@ -169,13 +163,13 @@ def wiwip_dag():
 
             return success(context=context, stage=tg_stage)
 
-        f = fetch(hook)
+        f = fetch(conn_id)
         v = verify.expand(context=upstream)
         f >> v
         return v
 
     @task_group
-    def monthly_indices(hook: HttpHook, upstream: List[Context]) -> List[Context]:
+    def monthly_indices(conn_id: str, upstream: List[Context]) -> List[Context]:
         tg_stage = "monthly_indices"
 
         @task
@@ -191,7 +185,7 @@ def wiwip_dag():
             return success(context=context, stage=tg_stage)
 
         @task
-        def fix(hook: HttpHook, context: Context) -> Context:
+        def fix(c: str, context: Context) -> Context:
             if context["success"] or context["stage"] != "monthly_indices":
                 return context
 
@@ -211,13 +205,13 @@ def wiwip_dag():
 
             return success(context=context, stage="add_missing_indices")
 
-        return fix.partial(hook=hook).expand(context=verify.expand(context=upstream))
+        return fix.partial(conn_id=conn_id).expand(context=verify.expand(context=upstream))
 
     @task_group
-    def aliases(hook: HttpHook, upstream: List[Context]) -> List[Context]:
+    def aliases(conn_id: str, upstream: List[Context]) -> List[Context]:
         tg_stage = "aliases"
         @task
-        def fetch(h: HttpHook, data: List[Context]) -> bool:
+        def fetch(h: str, data: List[Context]) -> List[Context]:
             results = fetch_from_endpoint(h, "/_aliases")
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
             return data
@@ -225,7 +219,7 @@ def wiwip_dag():
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
-            indices = xcom_pull("refetch_and_group_indices.group_by_tenant", context["tenant"])
+            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
 
             active_indices = []
             for month_start in generate_past_month_starts(context["retention"]):
@@ -237,21 +231,21 @@ def wiwip_dag():
                             aa["aliases"].keys()]):
                     return failure(context=context, stage=tg_stage, error="Alias not complete")
             return success(context=context, stage=tg_stage)
-        v = verify.expand(context=fetch(hook, upstream))
+        v = verify.expand(context=fetch(conn_id, upstream))
         return v
 
     @task
     def print_all(upstream: List[Context]) -> None:
         for c in upstream:
             pprint.pprint(c, indent=2)
+    connection_id = "es-wordtags"
+    t1 = fetch_indices_per_tenant(conn_id=connection_id)
+    t2 = ilm_settings(conn_id=connection_id, upstream=t1)
+    t3 = index_templates(conn_id=connection_id, upstream=t2)
+    t4 = monthly_indices(conn_id=connection_id, upstream=t3)
+    t5 = aliases(conn_id=connection_id, upstream=t4)
 
-    hook_get = HttpHook(method='GET', http_conn_id='es-wordtags')
-    t1 = fetch_and_group_indices(hook=hook_get)
-    t2 = ilm_settings(hook=hook_get, upstream=t1)
-    t3 = index_templates(hook=hook_get, upstream=t2)
-    t4 = monthly_indices(hook=hook_get, upstream=t3)
-    t5 = aliases(hook=hook_get, upstream=t4)
-    print_all(upstream=t5)
+    t1 >> t2 >> t3 >> t4 >> t5 >> print_all(upstream=t5)
 
 
 wiwip_dag()
