@@ -178,7 +178,7 @@ def wiwip_dag():
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
-            indices = xcom_pull("fetch_and_group_indices.group_by_tenant", context["tenant"])
+            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
             missing = []
             for month_start in generate_past_month_starts(context["retention"]):
                 if not any(f'{context["tenant"]}-{month_start:%Y-%m-%d}' in index for index in indices):
