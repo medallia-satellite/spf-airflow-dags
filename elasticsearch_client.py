@@ -92,7 +92,7 @@ def add_aliases(hook: HttpHook, actions: Result):
 @task
 def reconcile_aliases(hook: HttpHook, data: Result):
     index = data["key"]
-    aliases = generate_aliases(index)
+    aliases = expected_index_aliases(index)
     actions = [
         {
             "add": {

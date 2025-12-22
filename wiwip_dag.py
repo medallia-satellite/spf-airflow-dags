@@ -217,19 +217,19 @@ def wiwip_dag():
 
         @task
         def fix(c: str, context: Context) -> Context:
-            if context["success"] or context["stage"] != "monthly_indices":
+            if context["success"] or context["stage"] != tg_stage:
                 return context
 
             for month_start in context["error"]:
                 index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-0'
-                aliases = generate_aliases(index)
+                a = expected_index_aliases(index)
                 origination_date = int(month_start.timestamp() * 1e3)
                 payload = {
                     "settings": {"index.lifecycle.origination_date": origination_date},
                     "aliases": {
-                        aliases["read"]: {"is_write_index": False},
-                        aliases["write"]: {"is_write_index": True},
-                        aliases["rollover"]: {"is_write_index": False},
+                        a["read"]: {"is_write_index": False},
+                        a["write"]: {"is_write_index": True},
+                        a["rollover"]: {"is_write_index": False},
                     }
                 }
                 response = http_hook_put(c, index, json.dumps(payload))
@@ -259,12 +259,37 @@ def wiwip_dag():
             for month_start in generate_past_month_starts(context["retention"]):
                 active_indices += [index for index in indices if f'{context["tenant"]}-{month_start:%Y-%m-%d}' in index]
 
+            missing = []
             for index in active_indices:
                 index_aliases = xcom_pull("aliases.fetch", index).get("aliases", dict()).keys()
                 if not all([any(r.fullmatch(alias) for alias in index_aliases) for r in
                             ALIAS_REGEX_MAPPING.values()]):
-                    return failure(context=context, stage=tg_stage, error="Alias not complete")
+                    missing.append(index)
+
+            if missing:
+                return failure(context=context, stage=tg_stage, error=missing)
             return success(context=context, stage=tg_stage)
+
+
+        @task
+        def fix(c: str, context: Context) -> Context:
+            if context["success"] or context["stage"] != tg_stage:
+                return context
+            actions = []
+            for index in context["error"]:
+                details = extract_index_details(index)
+                actions += [
+                    {"add": {"index": index, "alias": details["read_alias"], "is_write_index": False}},
+                    {"add": {"index": index, "alias": details["write_alias"], "is_write_index": True}},
+                    {"add": {"index": index, "alias": details["rollover_alias"], "is_write_index": details["should_rollover"]}},
+                ]
+            print(f"{context['tenant']}: {actions}")
+            response = http_hook_put(c, "/_aliases", json.dumps({"actions": actions}))
+            print(response)
+
+            return success(context=context, stage=tg_stage)
+
+
 
         verified = verify.expand(context=fetch(conn_id, upstream))
         report(upstream=verified)
