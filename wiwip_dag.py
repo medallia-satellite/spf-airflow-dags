@@ -265,8 +265,11 @@ def wiwip_dag():
                             aa["aliases"].keys()]):
                     return failure(context=context, stage=tg_stage, error="Alias not complete")
             return success(context=context, stage=tg_stage)
-        v = verify.expand(context=fetch(conn_id, upstream))
-        return v
+
+        verified = verify.expand(context=fetch(conn_id, upstream))
+        report(upstream=verified)
+        return verified
+
 
     @task
     def print_all(upstream: List[Context]) -> None:
