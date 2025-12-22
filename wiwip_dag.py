@@ -260,9 +260,9 @@ def wiwip_dag():
                 active_indices += [index for index in indices if f'{context["tenant"]}-{month_start:%Y-%m-%d}' in index]
 
             for index in active_indices:
-                aa = xcom_pull("aliases.fetch", index)
-                if not all([any(r.fullmatch(alias) for r in ALIAS_REGEX_MAPPING.values()) for alias in
-                            aa["aliases"].keys()]):
+                index_aliases = xcom_pull("aliases.fetch", index).get("aliases", dict()).keys()
+                if not all([any(r.fullmatch(alias) for alias in index_aliases) for r in
+                            ALIAS_REGEX_MAPPING.values()]):
                     return failure(context=context, stage=tg_stage, error="Alias not complete")
             return success(context=context, stage=tg_stage)
 
