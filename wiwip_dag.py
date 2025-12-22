@@ -114,7 +114,7 @@ def wiwip_dag():
         for e in errors:
             pprint.pprint(e)
 
-        return upstream
+        return list(upstream)
 
     @task
     def extract_errors(upstream: List[Context], stage: str) -> List[Context]:
@@ -169,10 +169,10 @@ def wiwip_dag():
 
             return Context(tenant=context["tenant"], tenant_id=context["tenant_id"], stage=tg_stage, success=True, retention=retention[0])
 
-        f = fetch(conn_id)
-        v = verify.expand(context=upstream)
-        f >> v
-        return v
+        verified = verify.expand(context=upstream)
+        fetch(conn_id) >> verified
+        report(upstream=verified)
+        return verified
 
     @task_group
     def index_templates(conn_id: str, upstream: List[Context]) -> List[Context]:
@@ -197,10 +197,10 @@ def wiwip_dag():
 
             return success(context=context, stage=tg_stage)
 
-        f = fetch(conn_id)
-        v = verify.expand(context=upstream)
-        f >> v
-        return v
+        verified = verify.expand(context=upstream)
+        fetch(conn_id) >> verified
+        report(upstream=verified)
+        return verified
 
     @task_group
     def monthly_indices(conn_id: str, upstream: List[Context]) -> List[Context]:
@@ -241,7 +241,9 @@ def wiwip_dag():
 
             return success(context=context, stage="add_missing_indices")
 
-        return fix.partial(c=conn_id).expand(context=report(verify.expand(context=upstream)))
+        verified = verify.expand(context=upstream)
+        report(upstream=verified)
+        return fix.partial(c=conn_id).expand(context=verified)
 
     @task_group
     def aliases(conn_id: str, upstream: List[Context]) -> List[Context]:
@@ -250,7 +252,7 @@ def wiwip_dag():
         def fetch(h: str, data: List[Context]) -> List[Context]:
             results = http_hook_get(h, "/_aliases")
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
-            return [success(context=c, stage=tg_stage) for c in data if c["success"]]
+            return list(data)
 
         @task
         @chain_on_success
