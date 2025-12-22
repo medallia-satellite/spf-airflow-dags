@@ -250,7 +250,7 @@ def wiwip_dag():
         def fetch(h: str, data: List[Context]) -> List[Context]:
             results = http_hook_get(h, "/_aliases")
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
-            return data
+            return [success(context=c, stage=tg_stage) for c in data if c["success"]]
 
         @task
         @chain_on_success
