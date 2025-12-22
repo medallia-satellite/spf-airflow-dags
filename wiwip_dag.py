@@ -48,6 +48,16 @@ def http_hook_put(conn_id: str, endpoint: str, data: str):
     hook_put.check_response(response)
     return response.json()
 
+def http_hook_post(conn_id: str, endpoint: str, data: str):
+    hook_post = HttpHook(method='POST', http_conn_id=conn_id)
+    response = hook_post.run(
+        endpoint=f'/{endpoint}?pretty',
+        headers={'Content-Type': 'application/json'},
+        data=data
+    )
+    hook_post.check_response(response)
+    return response.json()
+
 def http_hook_get(conn_id: str, endpoint: str):
     hook_get = HttpHook(method='GET', http_conn_id=conn_id)
     response = hook_get.run(
@@ -284,7 +294,7 @@ def wiwip_dag():
                     {"add": {"index": index, "alias": details["rollover_alias"], "is_write_index": details["should_rollover"]}},
                 ]
             print(f"{context['tenant']}: {actions}")
-            response = http_hook_put(c, "/_aliases", json.dumps({"actions": actions}))
+            response = http_hook_post(c, "/_aliases", json.dumps({"actions": actions}))
             print(response)
 
             return success(context=context, stage=tg_stage)
