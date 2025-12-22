@@ -105,20 +105,16 @@ def wiwip_dag():
                 xcom_push(k, v)
 
     @task
-    def report(upstream: List[Context]) -> List[Context]:
+    def report(upstream: List[Context]) -> None:
         errors = [x for x in upstream if not x["success"]]
         print(f"""
         success: {len(upstream) - len(errors)}/{len(upstream)}
-        errors: {len([x for x in upstream if not x["success"]])}/{len(upstream)}
+        errors: {len(errors)}/{len(upstream)}
         """)
-        for e in errors:
-            pprint.pprint(e)
-
-        return list(upstream)
-
-    @task
-    def extract_errors(upstream: List[Context], stage: str) -> List[Context]:
-        return [c for c in upstream if not c["success"] and c["stage"] == stage]
+        for i, c in enumerate(upstream):
+            if not c["success"]:
+                print(f"{i}: {c['tenant']}")
+                pprint.pprint(c)
 
     @task
     def fetch_indices_per_tenant(conn_id: str, stage: str = "") -> List[Context]:
