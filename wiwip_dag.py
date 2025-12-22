@@ -293,7 +293,7 @@ def wiwip_dag():
 
         verified = verify.expand(context=fetch(conn_id, upstream))
         report(upstream=verified)
-        return verified
+        return fix.partial(c=conn_id).expand(context=verified)
 
 
     @task
