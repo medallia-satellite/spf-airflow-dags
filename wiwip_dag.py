@@ -9,7 +9,50 @@ from airflow.models import Param
 from airflow.operators.python import get_current_context
 from airflow.providers.http.hooks.http import HttpHook
 
-from repo.fix_and_verify import *
+import datetime
+import re
+
+from dateutil.relativedelta import relativedelta
+
+BASE_PATTERN = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
+BASE_REGEX = re.compile(BASE_PATTERN)
+INDEX_PATTERN = rf"^seaas-{BASE_PATTERN}" + r"-(?P<month>[0-9]{4}-[0-9]{2}-[0-9]{2})-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
+INDEX_REGEX = re.compile(INDEX_PATTERN)
+
+ALIAS_REGEX_MAPPING = {
+    "read": re.compile(rf"{BASE_PATTERN}"),
+    "write": re.compile(rf"{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}"),
+    "rollover": re.compile(rf"{BASE_PATTERN}-rollover"),
+}
+POLICY_MAPPING = {
+	"M6": 6,
+	"M6_rollover": 6,
+	"M18": 18,
+	"M18_rollover": 18,
+	"M36": 36,
+	"M36_rollover": 36,
+}
+
+def extract_index_details(index):
+    tenant = BASE_REGEX.search(index).group(0)
+    m = INDEX_REGEX.fullmatch(index).groupdict()
+    tenant_id = m["tenant_id"]
+    suffix = m["suffix"]
+    month = m["month"]
+    should_rollover = datetime.date.fromisoformat(month) == datetime.date.today().replace(day=1) + relativedelta(months=1)
+    read_alias = ALIAS_REGEX_MAPPING["read"].search(index).group(0)
+    write_alias = ALIAS_REGEX_MAPPING["write"].search(index).group(0)
+    rollover_alias = f"{read_alias}-rollover"
+    return {
+        "tenant": tenant,
+        "tenant_id": tenant_id,
+        "suffix": suffix,
+        "month": month,
+        "read_alias": read_alias,
+        "write_alias": write_alias,
+        "rollover_alias": rollover_alias,
+        "should_rollover": should_rollover,
+    }
 
 def chain_on_success(func):
     @functools.wraps(func)
@@ -233,14 +276,14 @@ def wiwip_dag():
 
             for month_start in context["error"]:
                 index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-0'
-                a = expected_index_aliases(index)
+                details = extract_index_details(index)
                 origination_date = int(month_start.timestamp() * 1e3)
                 payload = {
                     "settings": {"index.lifecycle.origination_date": origination_date},
                     "aliases": {
-                        a["read"]: {"is_write_index": False},
-                        a["write"]: {"is_write_index": True},
-                        a["rollover"]: {"is_write_index": False},
+                        details["read_alias"]: {"is_write_index": False},
+                        details["write_alias"]: {"is_write_index": True},
+                        details["rollover_alias"]: {"is_write_index": False},
                     }
                 }
                 if dry_run:
