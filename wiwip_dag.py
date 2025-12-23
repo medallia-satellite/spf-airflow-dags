@@ -101,24 +101,19 @@ def expected_index_template(tenant, retention_months):
 def extract_index_details(index):
     tenant = BASE_REGEX.search(index).group(0)
     m = INDEX_REGEX.fullmatch(index).groupdict()
-    tenant_id = m["tenant_id"]
-    suffix = m["suffix"]
     month = m["month"]
-    should_rollover = datetime.date.fromisoformat(
-        month
-    ) == datetime.date.today().replace(day=1) + relativedelta(months=1)
-    read_alias = ALIAS_REGEX_MAPPING["read"].search(index).group(0)
-    write_alias = ALIAS_REGEX_MAPPING["write"].search(index).group(0)
-    rollover_alias = f"{read_alias}-rollover"
     return {
         "tenant": tenant,
-        "tenant_id": tenant_id,
-        "suffix": suffix,
+        "tenant_id": m["tenant_id"],
+        "suffix": m["suffix"],
         "month": month,
-        "read_alias": read_alias,
-        "write_alias": write_alias,
-        "rollover_alias": rollover_alias,
-        "should_rollover": should_rollover,
+        "read_alias": tenant,
+        "rollover_alias": f"{tenant}-rollover",
+        "write_alias": ALIAS_REGEX_MAPPING["write"].search(index).group(0),
+        "should_rollover": (
+            datetime.date.fromisoformat(month)
+            == datetime.date.today().replace(day=1) + relativedelta(months=1)
+        ),
     }
 
 
@@ -196,7 +191,9 @@ class Context(TypedDict, total=False):
     conn_id: str
 
 
-def success(context: Context, stage: str, value: Any = None, conn_id: str = "") -> Context:
+def success(
+    context: Context, stage: str, value: Any = None, conn_id: str = ""
+) -> Context:
     return Context(
         tenant=context["tenant"],
         tenant_id=context["tenant_id"],
@@ -208,7 +205,9 @@ def success(context: Context, stage: str, value: Any = None, conn_id: str = "") 
     )
 
 
-def failure(context: Context, stage: str, error: Any = None, conn_id: str = "") -> Context:
+def failure(
+    context: Context, stage: str, error: Any = None, conn_id: str = ""
+) -> Context:
     return Context(
         tenant=context["tenant"],
         tenant_id=context["tenant_id"],
@@ -273,7 +272,13 @@ def wiwip_dag():
         for k, v in results.items():
             xcom_push(k[0], v)
             grouped.append(
-                Context(tenant=k[0], tenant_id=k[1], stage=stage, success=True, conn_id=conn_id)
+                Context(
+                    tenant=k[0],
+                    tenant_id=k[1],
+                    stage=stage,
+                    success=True,
+                    conn_id=conn_id,
+                )
             )
         return grouped
 
@@ -284,7 +289,8 @@ def wiwip_dag():
         @task
         def fetch(data: List[Context]) -> List[Context]:
             results = http_hook_get(
-                data[0]["conn_id"], "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias"
+                data[0]["conn_id"],
+                "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
             )
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
             return data
@@ -342,8 +348,7 @@ def wiwip_dag():
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            results = http_hook_get(
-                data[0]["conn_id"], "/_index_template/*-rollover")
+            results = http_hook_get(data[0]["conn_id"], "/_index_template/*-rollover")
             _filter_and_push(
                 {r["name"]: r["index_template"] for r in results["index_templates"]},
                 lambda x: ALIAS_REGEX_MAPPING["rollover"].match(x),
@@ -376,17 +381,24 @@ def wiwip_dag():
     @task_group
     def read_alias(upstream: List[Context]) -> List[Context]:
         tg_stage = "read_alias"
+
         @task
         def fetch(context: Context) -> Context:
-            indices = fetch_indices_in_alias(alias=context["tenant"], conn_id=context["conn_id"])
-            return success(context=context, stage=tg_stage, value=[i for i, _ in indices])
+            indices = fetch_indices_in_alias(
+                alias=context["tenant"], conn_id=context["conn_id"]
+            )
+            return success(
+                context=context, stage=tg_stage, value=[i for i, _ in indices]
+            )
 
         @task
         def verify(context: Context) -> Context:
             indices = set(xcom_pull("fetch_indices_per_tenant", context["tenant"]))
             read_indices = set(context["value"])
             if len(indices) != len(read_indices):
-                return failure(context=context, stage=tg_stage, error=list(indices - read_indices))
+                return failure(
+                    context=context, stage=tg_stage, error=list(indices - read_indices)
+                )
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch.expand(context=upstream))
@@ -517,7 +529,9 @@ def wiwip_dag():
                 print(f"{context['tenant']}: {actions}")
                 return success(context=context, stage=tg_stage)
 
-            response = http_hook_post(context["conn_id"], "/_aliases", json.dumps({"actions": actions}))
+            response = http_hook_post(
+                context["conn_id"], "/_aliases", json.dumps({"actions": actions})
+            )
             print(response)
 
             return success(context=context, stage=tg_stage)
@@ -583,7 +597,11 @@ def wiwip_dag():
                 print(f"{context['tenant']}: {actions}")
                 return success(context=context, stage=tg_stage)
 
-            http_hook_post(context["conn_id"], f"/_aliases/{alias}", json.dumps({"actions": actions}))
+            http_hook_post(
+                context["conn_id"],
+                f"/_aliases/{alias}",
+                json.dumps({"actions": actions}),
+            )
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(
@@ -606,7 +624,7 @@ def wiwip_dag():
     tt = read_alias(upstream=t3)
     t4 = monthly_indices(upstream=tt)
     t5 = aliases(upstream=t4)
-    t6 = rollover_alias( upstream=t5)
+    t6 = rollover_alias(upstream=t5)
     print_errors(upstream=t6)
 
 
