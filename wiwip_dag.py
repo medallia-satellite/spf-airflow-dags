@@ -383,6 +383,7 @@ def wiwip_dag():
         tg_stage = "read_alias"
 
         @task
+        @chain_on_success
         def fetch(context: Context) -> Context:
             indices = fetch_indices_in_alias(
                 alias=context["tenant"], conn_id=context["conn_id"]
@@ -392,6 +393,7 @@ def wiwip_dag():
             )
 
         @task
+        @chain_on_success
         def verify(context: Context) -> Context:
             indices = set(xcom_pull("fetch_indices_per_tenant", context["tenant"]))
             read_indices = set(context["value"])
