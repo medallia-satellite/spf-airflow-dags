@@ -37,6 +37,76 @@ POLICY_MAPPING = {
 }
 
 
+def default_index_settings():
+    return {
+        "analysis": {
+            "filter": {
+                "compound_capture": {
+                    "type": "pattern_capture",
+                    "preserve_original": "false",
+                    "patterns": ["(!?[^@!@]+)@!@"],
+                }
+            },
+            "analyzer": {
+                "topic-builder-analyzer": {
+                    "filter": ["compound_capture"],
+                    "type": "custom",
+                    "tokenizer": "whitespace",
+                }
+            },
+        },
+        "number_of_shards": "1",
+        "number_of_replicas": "1",
+    }
+
+
+def default_index_mappings():
+    return {
+        "properties": {
+            "comments": {
+                "type": "nested",
+                "properties": {
+                    "language": {"type": "keyword"},
+                    "linguisticConnections": {
+                        "type": "text",
+                        "analyzer": "topic-builder-analyzer",
+                        "position_increment_gap": 1000,
+                    },
+                    "linguisticConnectionsIndexes": {"type": "short"},
+                    "name": {"type": "keyword"},
+                    "persona": {"type": "keyword"},
+                    "sentenceContent": {
+                        "type": "text",
+                        "analyzer": "topic-builder-analyzer",
+                    },
+                    "sentenceIndex": {"type": "short"},
+                    "wordEndIndexes": {"type": "integer"},
+                    "wordStartIndexes": {"type": "integer"},
+                },
+            },
+            "responseDate": {"type": "date"},
+            "surveyId": {"type": "long"},
+        }
+    }
+
+
+def expected_index_template(tenant, retention_months):
+    rollover_alias = f"{tenant}-rollover"
+    index_pattern = f"seaas-{tenant}-*"
+    index_template = {
+        "index_patterns": [index_pattern],
+        "template": {
+            "settings": {"index": default_index_settings()},
+            "mappings": default_index_mappings(),
+        },
+    }
+    index_template["template"]["settings"]["index"]["lifecycle"] = {
+        "name": f"M{retention_months}_rollover",
+        "rollover_alias": rollover_alias,
+    }
+    return index_template
+
+
 def extract_index_details(index):
     tenant = BASE_REGEX.search(index).group(0)
     m = INDEX_REGEX.fullmatch(index).groupdict()
