@@ -308,7 +308,7 @@ def wiwip_dag():
         @task
         def fetch_indices_in_alias(h: str, context: Context) -> Context:
             alias = f"{context['tenant']}-rollover"
-            results = http_hook_get(h, f"/_aliases/{alias}")
+            results = http_hook_get(h, f"/_cat/aliases/{alias}")
             indices = [(i["index"], i["is_write_index"]) for i in results]
             xcom_push(alias, indices)
             return success(context=context, stage=tg_stage)
