@@ -108,6 +108,8 @@ def failure(context: Context, stage: str, error: Any = None) -> Context:
 
 )
 def wiwip_dag():
+    dry_run = True
+
     def _filter_and_push(results, filter_fn) -> None:
         for k, v in results.items():
             if filter_fn(k):
@@ -240,10 +242,13 @@ def wiwip_dag():
                         a["rollover"]: {"is_write_index": False},
                     }
                 }
+                if dry_run:
+                    print(f"Dry run: {index} - {payload}")
+                    continue
                 response = http_hook_put(c, index, json.dumps(payload))
                 print(f"{index}: {response}")
 
-            return success(context=context, stage="add_missing_indices")
+            return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=upstream)
         report(upstream=verified)
@@ -291,6 +296,11 @@ def wiwip_dag():
                     {"add": {"index": index, "alias": details["rollover_alias"], "is_write_index": details["should_rollover"]}},
                 ]
             print(f"{context['tenant']}: {actions}")
+
+            if dry_run:
+                print(f"{context['tenant']}: {actions}")
+                return success(context=context, stage=tg_stage)
+
             response = http_hook_post(c, "/_aliases", json.dumps({"actions": actions}))
             print(response)
 
@@ -342,6 +352,11 @@ def wiwip_dag():
                 if details["should_rollover"]:
                     actions.append({"add": {"index": index, "alias": alias, "is_write_index": True}})
                     break
+
+            if dry_run:
+                print(f"{context['tenant']}: {actions}")
+                return success(context=context, stage=tg_stage)
+
             http_hook_post(c, f"/_aliases/{alias}", json.dumps({"actions": actions}))
             return success(context=context, stage=tg_stage)
 
