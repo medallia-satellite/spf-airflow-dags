@@ -527,15 +527,15 @@ def wiwip_dag():
         return fix.expand(context=verified)
 
     @task_group
-    def rollover_alias(conn_id: str, upstream: List[Context]) -> List[Context]:
+    def rollover_alias(upstream: List[Context]) -> List[Context]:
         tg_stage = "rollover_alias"
 
         @task
-        def fetch(context: Context, conn_id: str, stage: str) -> Context:
+        def fetch(context: Context, stage: str) -> Context:
             if not context["success"]:
                 return context
             alias = f"{context['tenant']}-rollover"
-            indices = fetch_indices_in_alias(conn_id, alias)
+            indices = fetch_indices_in_alias(context["conn_id"], alias)
             xcom_push(alias, indices)
             return success(context=context, stage=stage)
 
@@ -587,10 +587,10 @@ def wiwip_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(
-            context=fetch.partial(conn_id=conn_id, stage=tg_stage).expand(context=upstream)
+            context=fetch.partial(stage=tg_stage).expand(context=upstream)
         )
         report(upstream=verified, stage=tg_stage)
-        return fix.partial(c=conn_id).expand(context=verified)
+        return fix.expand(context=verified)
 
     @task
     def print_errors(upstream: List[Context]) -> None:
