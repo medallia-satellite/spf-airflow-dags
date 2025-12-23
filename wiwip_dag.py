@@ -564,8 +564,7 @@ def wiwip_dag():
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
-            tenant = context["tenant"]
-            indices = xcom_pull("rollover_alias.fetch", tenant)[0]
+            indices = context["value"]
             indices_in_read_alias = indices["read_alias"]
             indices_in_rollover_alias = indices["rollover_alias"]
 
