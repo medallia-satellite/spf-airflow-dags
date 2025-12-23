@@ -535,7 +535,7 @@ def wiwip_dag():
             if not context["success"]:
                 return context
             alias = f"{context['tenant']}-rollover"
-            indices = fetch_indices_in_alias(conn_id=context["conn_id"], alias=alias)
+            indices = fetch_indices_in_alias(alias=alias, conn_id=context["conn_id"])
             xcom_push(alias, indices)
             return success(context=context, stage=stage)
 
