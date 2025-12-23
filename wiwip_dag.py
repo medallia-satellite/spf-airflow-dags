@@ -23,7 +23,7 @@ def xcom_pull(task_id: str, key: str) -> Any:
     context = get_current_context()
     ti = context["ti"]
     print(f"xcom_pull {task_id} {key}")
-    return ti.xcom_pull(task_ids=task_id, key=key)[0]
+    return ti.xcom_pull(task_ids=task_id, key=key)
 
 def xcom_push(key: str, value: Any) -> None:
     context = get_current_context()
@@ -316,7 +316,7 @@ def wiwip_dag():
         @task
         def verify(context: Context) -> Context:
             alias = f"{context['tenant']}-rollover"
-            indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)
+            indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)[0]
             print(f"{context['tenant']}: {list(indices)}")
             for index, is_write_alias in indices:
                 if is_write_alias:
@@ -332,7 +332,7 @@ def wiwip_dag():
             if context["success"] or context["stage"] != tg_stage:
                 return context
             alias = f"{context['tenant']}-rollover"
-            indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)
+            indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)[0]
             actions = []
             if index := context["error"]:
                 actions.append({"add": {"index": index, "alias": alias,"is_write_index": False}})
