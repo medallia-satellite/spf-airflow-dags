@@ -219,9 +219,9 @@ def failure(
     )
 
 
-def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, bool]]:
+def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
     results = http_hook_get(conn_id, f"/_cat/aliases/{alias}")
-    return [(i["index"], i["is_write_index"] == "true") for i in results]
+    return [(i["index"], i["alias"], i["is_write_index"] == "true") for i in results]
 
 
 @dag(
@@ -389,7 +389,7 @@ def wiwip_dag():
                 alias=context["tenant"], conn_id=context["conn_id"]
             )
             return success(
-                context=context, stage=tg_stage, value=[i for i, _ in indices]
+                context=context, stage=tg_stage, value=[i for i, _, _ in indices]
             )
 
         @task
@@ -406,6 +406,11 @@ def wiwip_dag():
         verified = verify.expand(context=fetch.expand(context=upstream))
         report(upstream=verified, stage=tg_stage)
         return verified
+
+    @task_group
+    def write_alias(upstream: List[Context]) -> List[Context]:
+        tg_stage = "write_alias"
+
 
     @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
@@ -550,50 +555,52 @@ def wiwip_dag():
         def fetch(context: Context, stage: str) -> Context:
             if not context["success"]:
                 return context
-            alias = f"{context['tenant']}-rollover"
-            indices = fetch_indices_in_alias(alias=alias, conn_id=context["conn_id"])
-            xcom_push(alias, indices)
-            return success(context=context, stage=stage)
+            tenant = context["tenant"]
+            return success(context=context, stage=stage, value={
+                "read_alias": [i for i, _, _ in fetch_indices_in_alias(alias=tenant, conn_id=context["conn_id"])],
+                "rollover_alias": {i: b for i, _, b in fetch_indices_in_alias(alias=f"{tenant}-rollover", conn_id=context["conn_id"])},
+            })
 
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
-            alias = f"{context['tenant']}-rollover"
-            indices = xcom_pull("rollover_alias.fetch", alias)[0]
-            print(f"{context['tenant']}: {list(indices)}")
-            for index, is_write_alias in indices:
-                if is_write_alias:
-                    details = extract_index_details(index)
-                    if details["should_rollover"]:
-                        return success(context=context, stage=tg_stage)
-                    else:
-                        return failure(context=context, stage=tg_stage, error=index)
-            return failure(context=context, stage=tg_stage, error=None)
+            tenant = context["tenant"]
+            indices = xcom_pull("rollover_alias.fetch", tenant)[0]
+            indices_in_read_alias = indices["read_alias"]
+            indices_in_rollover_alias = indices["rollover_alias"]
+
+            needs_fixing = []
+            for index in indices_in_read_alias:
+                if index not in indices_in_rollover_alias:
+                    needs_fixing.append(index)
+                details = extract_index_details(index)
+
+                if indices_in_rollover_alias[index] and details["should_rollover"]:
+                    return success(context=context, stage=tg_stage)
+
+                if indices_in_rollover_alias[index] or details["should_rollover"]:
+                    needs_fixing.append(index)
+
+            return failure(context=context, stage=tg_stage, error=needs_fixing)
 
         @task
         def fix(context: Context) -> Context:
             if context["success"] or context["stage"] != tg_stage:
                 return context
+
             alias = f"{context['tenant']}-rollover"
-            indices = xcom_pull("rollover_alias.fetch", alias)[0]
             actions = []
-            if index := context["error"]:
-                actions.append(
-                    {"add": {"index": index, "alias": alias, "is_write_index": False}}
-                )
-            for index, is_write_alias in indices:
+            for index in context["error"]:
                 details = extract_index_details(index)
-                if details["should_rollover"]:
-                    actions.append(
-                        {
-                            "add": {
-                                "index": index,
-                                "alias": alias,
-                                "is_write_index": True,
-                            }
+                actions.append(
+                    {
+                        "add": {
+                            "index": index,
+                            "alias": alias,
+                            "is_write_index": details["should_rollover"],
                         }
-                    )
-                    break
+                    }
+                )
 
             if dry_run:
                 print(f"{context['tenant']}: {actions}")
