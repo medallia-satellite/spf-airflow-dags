@@ -306,7 +306,6 @@ def wiwip_dag():
     def rollover_alias(conn_id: str, upstream: List[Context]) -> List[Context]:
         tg_stage = "rollover_alias"
         @task
-        @chain_on_success
         def fetch_indices_in_alias(h: str, context: Context) -> Context:
             alias = f"{context['tenant']}-rollover"
             results = http_hook_get(h, f"/_aliases/{alias}")
