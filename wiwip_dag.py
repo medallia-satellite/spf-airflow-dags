@@ -280,7 +280,6 @@ def wiwip_dag():
                 return failure(context=context, stage=tg_stage, error=missing)
             return success(context=context, stage=tg_stage)
 
-
         @task
         def fix(c: str, context: Context) -> Context:
             if context["success"] or context["stage"] != tg_stage:
@@ -299,12 +298,57 @@ def wiwip_dag():
 
             return success(context=context, stage=tg_stage)
 
-
-
         verified = verify.expand(context=fetch(conn_id, upstream))
         report(upstream=verified)
         return fix.partial(c=conn_id).expand(context=verified)
 
+    @task_group
+    def rollover_alias(conn_id: str, upstream: List[Context]) -> List[Context]:
+        tg_stage = "rollover_alias"
+        @task
+        @chain_on_success
+        def fetch_indices_in_alias(h: str, context: Context) -> Context:
+            alias = f"{context['tenant']}-rollover"
+            results = http_hook_get(h, f"/_aliases/{alias}")
+            indices = [(i["index"], i["is_write_index"]) for i in results]
+            xcom_push(alias, indices)
+            return success(context=context, stage=tg_stage)
+
+        @task
+        @chain_on_success
+        def verify(context: Context) -> Context:
+            alias = f"{context['tenant']}-rollover"
+            indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)
+            for index, is_write_alias in indices:
+                if is_write_alias:
+                    details = extract_index_details(index)
+                    if details["should_rollover"]:
+                        return success(context=context, stage=tg_stage)
+                    else:
+                        return failure(context=context, stage=tg_stage, error=index)
+            return failure(context=context, stage=tg_stage, error=None)
+
+        @task
+        def fix(c: str, context: Context) -> Context:
+            if context["success"] or context["stage"] != tg_stage:
+                return context
+            alias = f"{context['tenant']}-rollover"
+            indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)
+            actions = []
+            if index := context["error"]:
+                actions.append({"add": {"index": index, "alias": alias,"is_write_index": False}})
+            for index, is_write_alias in indices:
+                details = extract_index_details(index)
+                if details["should_rollover"]:
+                    actions.append({"add": {"index": index, "alias": alias, "is_write_index": True}})
+                    break
+            http_hook_post(c, f"/_aliases/{alias}", json.dumps({"actions": actions}))
+            return success(context=context, stage=tg_stage)
+
+
+        verified = verify.expand(context=fetch_indices_in_alias.partial(h=conn_id).expand(context=upstream))
+        report(upstream=verified)
+        return fix.partial(c=conn_id).expand(context=verified)
 
     @task
     def print_all(upstream: List[Context]) -> None:
