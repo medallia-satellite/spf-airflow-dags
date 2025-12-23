@@ -309,12 +309,11 @@ def wiwip_dag():
         def fetch_indices_in_alias(h: str, context: Context) -> Context:
             alias = f"{context['tenant']}-rollover"
             results = http_hook_get(h, f"/_cat/aliases/{alias}")
-            indices = [(i["index"], i["is_write_index"]) for i in results]
+            indices = [(i["index"], i["is_write_index"] == "true") for i in results]
             xcom_push(alias, indices)
             return success(context=context, stage=tg_stage)
 
         @task
-        @chain_on_success
         def verify(context: Context) -> Context:
             alias = f"{context['tenant']}-rollover"
             indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)
@@ -333,6 +332,7 @@ def wiwip_dag():
                 return context
             alias = f"{context['tenant']}-rollover"
             indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)
+            print(f"{context['tenant']}: {indices}")
             actions = []
             if index := context["error"]:
                 actions.append({"add": {"index": index, "alias": alias,"is_write_index": False}})
