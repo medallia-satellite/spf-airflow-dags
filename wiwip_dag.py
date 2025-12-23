@@ -116,11 +116,12 @@ def wiwip_dag():
                 xcom_push(k, v)
 
     @task
-    def report(upstream: List[Context]) -> None:
+    def report(upstream: List[Context], stage: str) -> None:
         errors = [x for x in upstream if not x["success"]]
         print(f"""
         success: {len(upstream) - len(errors)}/{len(upstream)}
         errors: {len(errors)}/{len(upstream)}
+        errors in stage {stage}: {len([e for e in errors if e["stage"] == stage])}/{len(errors)}
         """)
         for i, c in enumerate(upstream):
             if not c["success"]:
@@ -178,7 +179,7 @@ def wiwip_dag():
 
         verified = verify.expand(context=upstream)
         fetch(conn_id) >> verified
-        report(upstream=verified)
+        report(upstream=verified, stage=tg_stage)
         return verified
 
     @task_group
@@ -206,7 +207,7 @@ def wiwip_dag():
 
         verified = verify.expand(context=upstream)
         fetch(conn_id) >> verified
-        report(upstream=verified)
+        report(upstream=verified, stage=tg_stage)
         return verified
 
     @task_group
@@ -251,7 +252,7 @@ def wiwip_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=upstream)
-        report(upstream=verified)
+        report(upstream=verified, stage=tg_stage)
         return fix.partial(c=conn_id).expand(context=verified)
 
     @task_group
@@ -307,7 +308,7 @@ def wiwip_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch(conn_id, upstream))
-        report(upstream=verified)
+        report(upstream=verified, stage=tg_stage)
         return fix.partial(c=conn_id).expand(context=verified)
 
     @task_group
@@ -362,7 +363,7 @@ def wiwip_dag():
 
 
         verified = verify.expand(context=fetch_indices_in_alias.partial(h=conn_id).expand(context=upstream))
-        report(upstream=verified)
+        report(upstream=verified, stage=tg_stage)
         return fix.partial(c=conn_id).expand(context=verified)
 
     @task
