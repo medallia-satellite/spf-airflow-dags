@@ -360,7 +360,8 @@ def wiwip_dag():
     t3 = index_templates(conn_id=connection_id, upstream=t2)
     t4 = monthly_indices(conn_id=connection_id, upstream=t3)
     t5 = aliases(conn_id=connection_id, upstream=t4)
-    print_all(upstream=t5)
+    t6 = rollover_alias(conn_id=connection_id, upstream=t5)
+    print_all(upstream=t6)
 
 
 wiwip_dag()
