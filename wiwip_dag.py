@@ -124,7 +124,7 @@ def wiwip_dag():
         errors in stage {stage}: {len([e for e in errors if e["stage"] == stage])}/{len(errors)}
         """)
         for i, c in enumerate(upstream):
-            if not c["success"]:
+            if not c["success"] and c["stage"] == stage:
                 print(f"{i}: {c['tenant']}")
                 pprint.pprint(c)
 
