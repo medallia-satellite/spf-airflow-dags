@@ -370,6 +370,7 @@ def wiwip_dag():
     def print_errors(upstream: List[Context]) -> None:
         for c in upstream:
             if not c["success"]:
+                print(f'{c["tenant"]} - {c["stage"]}:')
                 pprint.pprint(c, indent=2)
 
     connection_id = "{{ params.db_conn }}"
