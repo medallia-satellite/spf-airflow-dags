@@ -584,7 +584,7 @@ def wiwip_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(
-            context=fetch_indices_in_alias.partial(conn_id=conn_id, stage=tg_stage).expand(context=upstream)
+            context=fetch.partial(conn_id=conn_id, stage=tg_stage).expand(context=upstream)
         )
         report(upstream=verified, stage=tg_stage)
         return fix.partial(c=conn_id).expand(context=verified)
