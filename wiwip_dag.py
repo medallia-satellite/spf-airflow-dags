@@ -19,6 +19,7 @@ def chain_on_success(func):
         return func(context)
     return wrapper
 
+
 def xcom_pull(task_id: str, key: str) -> Any:
     context = get_current_context()
     ti = context["ti"]
@@ -95,8 +96,6 @@ def failure(context: Context, stage: str, error: Any = None) -> Context:
         error=error if error else context.get("error"),
         retention=context.get("retention"),
     )
-
-
 
 
 @dag(
@@ -224,7 +223,6 @@ def wiwip_dag():
                 return failure(context=context, stage=tg_stage, error=missing)
             return success(context=context, stage=tg_stage)
 
-
         @task
         def fix(c: str, context: Context) -> Context:
             if context["success"] or context["stage"] != tg_stage:
@@ -307,6 +305,8 @@ def wiwip_dag():
         tg_stage = "rollover_alias"
         @task
         def fetch_indices_in_alias(h: str, context: Context) -> Context:
+            if not context["success"]:
+                return context
             alias = f"{context['tenant']}-rollover"
             results = http_hook_get(h, f"/_cat/aliases/{alias}")
             indices = [(i["index"], i["is_write_index"] == "true") for i in results]
@@ -314,6 +314,7 @@ def wiwip_dag():
             return success(context=context, stage=tg_stage)
 
         @task
+        @chain_on_success
         def verify(context: Context) -> Context:
             alias = f"{context['tenant']}-rollover"
             indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)[0]
@@ -350,9 +351,11 @@ def wiwip_dag():
         return fix.partial(c=conn_id).expand(context=verified)
 
     @task
-    def print_all(upstream: List[Context]) -> None:
+    def print_errors(upstream: List[Context]) -> None:
         for c in upstream:
-            pprint.pprint(c, indent=2)
+            if not c["success"]:
+                pprint.pprint(c, indent=2)
+
     connection_id = "{{ params.db_conn }}"
     t1 = fetch_indices_per_tenant(conn_id=connection_id)
     t2 = ilm_settings(conn_id=connection_id, upstream=t1)
@@ -360,7 +363,7 @@ def wiwip_dag():
     t4 = monthly_indices(conn_id=connection_id, upstream=t3)
     t5 = aliases(conn_id=connection_id, upstream=t4)
     t6 = rollover_alias(conn_id=connection_id, upstream=t5)
-    print_all(upstream=t6)
+    print_errors(upstream=t6)
 
 
 wiwip_dag()
