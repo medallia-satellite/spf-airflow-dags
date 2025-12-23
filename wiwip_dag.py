@@ -193,26 +193,29 @@ class Context(TypedDict, total=False):
     stage: Optional[str]
     value: Optional[Any]
     retention: Optional[int]
+    conn_id: str
 
 
-def success(context: Context, stage: str, value: Any = None) -> Context:
+def success(context: Context, stage: str, value: Any = None, conn_id: str = "") -> Context:
     return Context(
         tenant=context["tenant"],
         tenant_id=context["tenant_id"],
         success=True,
         stage=stage,
         value=value if value else context.get("value"),
+        conn_id=conn_id if conn_id else context.get("conn_id"),
         retention=context.get("retention"),
     )
 
 
-def failure(context: Context, stage: str, error: Any = None) -> Context:
+def failure(context: Context, stage: str, error: Any = None, conn_id: str = "") -> Context:
     return Context(
         tenant=context["tenant"],
         tenant_id=context["tenant_id"],
         success=False,
         stage=stage,
         error=error if error else context.get("error"),
+        conn_id=conn_id if conn_id else context.get("conn_id"),
         retention=context.get("retention"),
     )
 
@@ -270,21 +273,21 @@ def wiwip_dag():
         for k, v in results.items():
             xcom_push(k[0], v)
             grouped.append(
-                Context(tenant=k[0], tenant_id=k[1], stage=stage, success=True)
+                Context(tenant=k[0], tenant_id=k[1], stage=stage, success=True, conn_id=conn_id)
             )
         return grouped
 
     @task_group
-    def ilm_settings(conn_id: str, upstream: List[Context]) -> List[Context]:
+    def ilm_settings(upstream: List[Context]) -> List[Context]:
         tg_stage = "ilm_settings"
 
         @task
-        def fetch(h: str) -> bool:
+        def fetch(data: List[Context]) -> List[Context]:
             results = http_hook_get(
-                h, "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias"
+                data[0]["conn_id"], "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias"
             )
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
-            return True
+            return data
 
         @task
         @chain_on_success
@@ -323,28 +326,29 @@ def wiwip_dag():
             return Context(
                 tenant=context["tenant"],
                 tenant_id=context["tenant_id"],
+                conn_id=context["conn_id"],
                 stage=tg_stage,
                 success=True,
                 retention=retention[0],
             )
 
-        verified = verify.expand(context=upstream)
-        fetch(conn_id) >> verified
+        verified = verify.expand(context=fetch(upstream))
         report(upstream=verified, stage=tg_stage)
         return verified
 
     @task_group
-    def index_templates(conn_id: str, upstream: List[Context]) -> List[Context]:
+    def index_templates(upstream: List[Context]) -> List[Context]:
         tg_stage = "index_templates"
 
         @task
-        def fetch(h: str) -> bool:
-            results = http_hook_get(h, "/_index_template/*-rollover")
+        def fetch(data: List[Context]) -> List[Context]:
+            results = http_hook_get(
+                data[0]["conn_id"], "/_index_template/*-rollover")
             _filter_and_push(
                 {r["name"]: r["index_template"] for r in results["index_templates"]},
                 lambda x: ALIAS_REGEX_MAPPING["rollover"].match(x),
             )
-            return True
+            return data
 
         @task
         @chain_on_success
@@ -365,17 +369,16 @@ def wiwip_dag():
 
             return success(context=context, stage=tg_stage)
 
-        verified = verify.expand(context=upstream)
-        fetch(conn_id) >> verified
+        verified = verify.expand(context=fetch(upstream))
         report(upstream=verified, stage=tg_stage)
         return verified
 
     @task_group
-    def read_alias(conn_id: str, upstream: List[Context]) -> List[Context]:
+    def read_alias(upstream: List[Context]) -> List[Context]:
         tg_stage = "read_alias"
         @task
         def fetch(context: Context) -> Context:
-            indices = fetch_indices_in_alias(alias=context["tenant"], conn_id=conn_id)
+            indices = fetch_indices_in_alias(alias=context["tenant"], conn_id=context["conn_id"])
             return success(context=context, stage=tg_stage, value=[i for i, _ in indices])
 
         @task
@@ -391,7 +394,7 @@ def wiwip_dag():
         return verified
 
     @task_group
-    def monthly_indices(conn_id: str, upstream: List[Context]) -> List[Context]:
+    def monthly_indices(upstream: List[Context]) -> List[Context]:
         tg_stage = "monthly_indices"
 
         @task
@@ -410,7 +413,7 @@ def wiwip_dag():
             return success(context=context, stage=tg_stage)
 
         @task
-        def fix(c: str, context: Context) -> Context:
+        def fix(context: Context) -> Context:
             if context["success"] or context["stage"] != tg_stage:
                 return context
 
@@ -429,24 +432,24 @@ def wiwip_dag():
                 if dry_run:
                     print(f"Dry run: {index} - {payload}")
                     continue
-                response = http_hook_put(c, index, json.dumps(payload))
+                response = http_hook_put(context["conn_id"], index, json.dumps(payload))
                 print(f"{index}: {response}")
 
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=upstream)
         report(upstream=verified, stage=tg_stage)
-        return fix.partial(c=conn_id).expand(context=verified)
+        return fix.expand(context=verified)
 
     @task_group
-    def aliases(conn_id: str, upstream: List[Context]) -> List[Context]:
+    def aliases(upstream: List[Context]) -> List[Context]:
         tg_stage = "aliases"
 
         @task
-        def fetch(h: str, data: List[Context]) -> List[Context]:
-            results = http_hook_get(h, "/_aliases")
+        def fetch(data: List[Context]) -> List[Context]:
+            results = http_hook_get(data[0]["conn_id"], "/_aliases")
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
-            return list(data)
+            return data
 
         @task
         @chain_on_success
@@ -479,7 +482,7 @@ def wiwip_dag():
             return success(context=context, stage=tg_stage)
 
         @task
-        def fix(c: str, context: Context) -> Context:
+        def fix(context: Context) -> Context:
             if context["success"] or context["stage"] != tg_stage:
                 return context
             actions = []
@@ -514,14 +517,14 @@ def wiwip_dag():
                 print(f"{context['tenant']}: {actions}")
                 return success(context=context, stage=tg_stage)
 
-            response = http_hook_post(c, "/_aliases", json.dumps({"actions": actions}))
+            response = http_hook_post(context["conn_id"], "/_aliases", json.dumps({"actions": actions}))
             print(response)
 
             return success(context=context, stage=tg_stage)
 
-        verified = verify.expand(context=fetch(conn_id, upstream))
+        verified = verify.expand(context=fetch(upstream))
         report(upstream=verified, stage=tg_stage)
-        return fix.partial(c=conn_id).expand(context=verified)
+        return fix.expand(context=verified)
 
     @task_group
     def rollover_alias(conn_id: str, upstream: List[Context]) -> List[Context]:
@@ -598,12 +601,12 @@ def wiwip_dag():
 
     connection_id = "{{ params.db_conn }}"
     t1 = fetch_indices_per_tenant(conn_id=connection_id)
-    t2 = ilm_settings(conn_id=connection_id, upstream=t1)
-    t3 = index_templates(conn_id=connection_id, upstream=t2)
-    tt = read_alias(conn_id=connection_id, upstream=t3)
-    t4 = monthly_indices(conn_id=connection_id, upstream=tt)
-    t5 = aliases(conn_id=connection_id, upstream=t4)
-    t6 = rollover_alias(conn_id=connection_id, upstream=t5)
+    t2 = ilm_settings(upstream=t1)
+    t3 = index_templates(upstream=t2)
+    tt = read_alias(upstream=t3)
+    t4 = monthly_indices(upstream=tt)
+    t5 = aliases(upstream=t4)
+    t6 = rollover_alias( upstream=t5)
     print_errors(upstream=t6)
 
 
