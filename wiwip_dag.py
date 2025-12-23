@@ -555,7 +555,7 @@ def wiwip_dag():
             return failure(context=context, stage=tg_stage, error=None)
 
         @task
-        def fix(c: str, context: Context) -> Context:
+        def fix(context: Context) -> Context:
             if context["success"] or context["stage"] != tg_stage:
                 return context
             alias = f"{context['tenant']}-rollover"
@@ -583,7 +583,7 @@ def wiwip_dag():
                 print(f"{context['tenant']}: {actions}")
                 return success(context=context, stage=tg_stage)
 
-            http_hook_post(c, f"/_aliases/{alias}", json.dumps({"actions": actions}))
+            http_hook_post(context["conn_id"], f"/_aliases/{alias}", json.dumps({"actions": actions}))
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(
