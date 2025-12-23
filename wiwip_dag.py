@@ -379,40 +379,6 @@ def wiwip_dag():
         return verified
 
     @task_group
-    def read_alias(upstream: List[Context]) -> List[Context]:
-        tg_stage = "read_alias"
-
-        @task
-        @chain_on_success
-        def fetch(context: Context) -> Context:
-            indices = fetch_indices_in_alias(
-                alias=context["tenant"], conn_id=context["conn_id"]
-            )
-            return success(
-                context=context, stage=tg_stage, value=[i for i, _, _ in indices]
-            )
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            indices = set(xcom_pull("fetch_indices_per_tenant", context["tenant"]))
-            read_indices = set(context["value"])
-            if len(indices) != len(read_indices):
-                return failure(
-                    context=context, stage=tg_stage, error=list(indices - read_indices)
-                )
-            return success(context=context, stage=tg_stage)
-
-        verified = verify.expand(context=fetch.expand(context=upstream))
-        report(upstream=verified, stage=tg_stage)
-        return verified
-
-    @task_group
-    def write_alias(upstream: List[Context]) -> List[Context]:
-        tg_stage = "write_alias"
-
-
-    @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
         tg_stage = "monthly_indices"
 
@@ -422,11 +388,9 @@ def wiwip_dag():
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
             missing = []
             for month_start in generate_past_month_starts(context["retention"]):
-                if not any(
-                    f'{context["tenant"]}-{month_start:%Y-%m-%d}' in index
-                    for index in indices
-                ):
+                if not any(index.startswith(f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}') for index in indices):
                     missing.append(month_start)
+
             if missing:
                 return failure(context=context, stage=tg_stage, error=missing)
             return success(context=context, stage=tg_stage)
@@ -459,6 +423,40 @@ def wiwip_dag():
         verified = verify.expand(context=upstream)
         report(upstream=verified, stage=tg_stage)
         return fix.expand(context=verified)
+
+    @task_group
+    def read_alias(upstream: List[Context]) -> List[Context]:
+        tg_stage = "read_alias"
+
+        @task
+        @chain_on_success
+        def fetch(context: Context) -> Context:
+            indices = fetch_indices_in_alias(
+                alias=context["tenant"], conn_id=context["conn_id"]
+            )
+            return success(
+                context=context, stage=tg_stage, value=[i for i, _, _ in indices]
+            )
+
+        @task
+        @chain_on_success
+        def verify(context: Context) -> Context:
+            indices = set(xcom_pull("fetch_indices_per_tenant", context["tenant"]))
+            read_indices = set(context["value"])
+            if len(indices) != len(read_indices):
+                return failure(
+                    context=context, stage=tg_stage, error=list(indices - read_indices)
+                )
+            return success(context=context, stage=tg_stage)
+
+        verified = verify.expand(context=fetch.expand(context=upstream))
+        report(upstream=verified, stage=tg_stage)
+        return verified
+
+    @task_group
+    def write_alias(upstream: List[Context]) -> List[Context]:
+        tg_stage = "write_alias"
+
 
     @task_group
     def aliases(upstream: List[Context]) -> List[Context]:
