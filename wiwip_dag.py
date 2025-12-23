@@ -317,6 +317,7 @@ def wiwip_dag():
         def verify(context: Context) -> Context:
             alias = f"{context['tenant']}-rollover"
             indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)
+            print(f"{context['tenant']}: {indices}")
             for index, is_write_alias in indices:
                 if is_write_alias:
                     details = extract_index_details(index)
@@ -332,7 +333,6 @@ def wiwip_dag():
                 return context
             alias = f"{context['tenant']}-rollover"
             indices = xcom_pull("rollover_alias.fetch_indices_in_alias", alias)
-            print(f"{context['tenant']}: {indices}")
             actions = []
             if index := context["error"]:
                 actions.append({"add": {"index": index, "alias": alias,"is_write_index": False}})
