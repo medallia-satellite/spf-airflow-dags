@@ -213,7 +213,7 @@ def failure(
         tenant_id=context["tenant_id"],
         success=False,
         stage=stage,
-        error=error if error else context.get("error"),
+        error=error if error is not None else context.get("error"),
         conn_id=conn_id if conn_id else context.get("conn_id"),
         retention=context.get("retention"),
     )
@@ -222,6 +222,10 @@ def failure(
 def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
     results = http_hook_get(conn_id, f"/_cat/aliases/{alias}")
     return [(i["index"], i["alias"], i["is_write_index"] == "true") for i in results]
+
+def fetch_indices(prefix: str, conn_id: str) -> List[str]:
+    results = http_hook_get(conn_id, f"/_cat/indices/{prefix}*?h=index&format=json")
+    return [r["index"] for r in results]
 
 
 @dag(
@@ -431,18 +435,17 @@ def wiwip_dag():
         @task
         @chain_on_success
         def fetch(context: Context) -> Context:
-            indices = fetch_indices_in_alias(
-                alias=context["tenant"], conn_id=context["conn_id"]
-            )
-            return success(
-                context=context, stage=tg_stage, value=[i for i, _, _ in indices]
-            )
+            tenant = context["tenant"]
+            return success(context=context, stage=tg_stage, value={
+                "read_indices": [i for i, _, _ in fetch_indices_in_alias(alias=tenant, conn_id=context["conn_id"])],
+                "indices": fetch_indices(prefix=tenant, conn_id=context["conn_id"]),
+            })
 
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
-            indices = set(xcom_pull("fetch_indices_per_tenant", context["tenant"]))
-            read_indices = set(context["value"])
+            indices = context["value"]["indices"]
+            read_indices = context["value"]["read_indices"]
             if len(indices) != len(read_indices):
                 return failure(
                     context=context, stage=tg_stage, error=list(indices - read_indices)
@@ -550,11 +553,11 @@ def wiwip_dag():
         tg_stage = "rollover_alias"
 
         @task
-        def fetch(context: Context, stage: str) -> Context:
+        def fetch(context: Context) -> Context:
             if not context["success"]:
                 return context
             tenant = context["tenant"]
-            return success(context=context, stage=stage, value={
+            return success(context=context, stage=tg_stage, value={
                 "read_alias": [i for i, _, _ in fetch_indices_in_alias(alias=tenant, conn_id=context["conn_id"])],
                 "rollover_alias": {i: b for i, _, b in fetch_indices_in_alias(alias=f"{tenant}-rollover", conn_id=context["conn_id"])},
             })
@@ -611,7 +614,7 @@ def wiwip_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(
-            context=fetch.partial(stage=tg_stage).expand(context=upstream)
+            context=fetch.expand(context=upstream)
         )
         report(upstream=verified, stage=tg_stage)
         return fix.expand(context=verified)
