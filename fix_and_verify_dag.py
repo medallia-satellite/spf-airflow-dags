@@ -3,129 +3,13 @@ import json
 import pprint
 from collections import defaultdict
 from typing import TypedDict, Optional, Any, List, Tuple
-import datetime
-from dateutil.relativedelta import relativedelta
-
-import re
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
-from airflow.operators.python import get_current_context
-from airflow.providers.http.hooks.http import HttpHook
 
-
-BASE_PATTERN = r"(\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-\1"
-BASE_REGEX = re.compile(BASE_PATTERN)
-INDEX_PATTERN = (
-    rf"^seaas-{BASE_PATTERN}"
-    + r"-(?P<month>[0-9]{4}-[0-9]{2}-[0-9]{2})-(?P<tenant_id>[0-9]+)-(?P<suffix>[0-9]+)$"
-)
-INDEX_REGEX = re.compile(INDEX_PATTERN)
-
-ALIAS_REGEX_MAPPING = {
-    "read": re.compile(rf"{BASE_PATTERN}"),
-    "write": re.compile(rf"{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}"),
-    "rollover": re.compile(rf"{BASE_PATTERN}-rollover"),
-}
-POLICY_MAPPING = {
-    "M6": 6,
-    "M6_rollover": 6,
-    "M18": 18,
-    "M18_rollover": 18,
-    "M36": 36,
-    "M36_rollover": 36,
-}
-
-
-def expected_index_template(tenant, retention_months):
-    return {
-        "index_patterns": [f"seaas-{tenant}-*"],
-        "template": {
-            "settings": {
-                "index": {
-                    "lifecycle": {
-                        "name": f"M{retention_months}_rollover",
-                        "rollover_alias": f"{tenant}-rollover",
-                    },
-                    "analysis": {
-                        "filter": {
-                            "compound_capture": {
-                                "type": "pattern_capture",
-                                "preserve_original": "false",
-                                "patterns": ["(!?[^@!@]+)@!@"],
-                            }
-                        },
-                        "analyzer": {
-                            "topic-builder-analyzer": {
-                                "filter": ["compound_capture"],
-                                "type": "custom",
-                                "tokenizer": "whitespace",
-                            }
-                        },
-                    },
-                    "number_of_shards": "1",
-                    "number_of_replicas": "1",
-                }
-            },
-            "mappings": {
-                "properties": {
-                    "comments": {
-                        "type": "nested",
-                        "properties": {
-                            "language": {"type": "keyword"},
-                            "linguisticConnections": {
-                                "type": "text",
-                                "analyzer": "topic-builder-analyzer",
-                                "position_increment_gap": 1000,
-                            },
-                            "linguisticConnectionsIndexes": {"type": "short"},
-                            "name": {"type": "keyword"},
-                            "persona": {"type": "keyword"},
-                            "sentenceContent": {
-                                "type": "text",
-                                "analyzer": "topic-builder-analyzer",
-                            },
-                            "sentenceIndex": {"type": "short"},
-                            "wordEndIndexes": {"type": "integer"},
-                            "wordStartIndexes": {"type": "integer"},
-                        },
-                    },
-                    "responseDate": {"type": "date"},
-                    "surveyId": {"type": "long"},
-                }
-            },
-        },
-    }
-
-
-def extract_index_details(index):
-    tenant = BASE_REGEX.search(index).group(0)
-    m = INDEX_REGEX.fullmatch(index).groupdict()
-    month = m["month"]
-    return {
-        "tenant": tenant,
-        "tenant_id": m["tenant_id"],
-        "suffix": int(m["suffix"]),
-        "month": month,
-        "read_alias": tenant,
-        "rollover_alias": f"{tenant}-rollover",
-        "write_alias": ALIAS_REGEX_MAPPING["write"].search(index).group(0),
-        "should_rollover": (
-            datetime.date.fromisoformat(month)
-            == datetime.date.today().replace(day=1) + relativedelta(months=1)
-        ),
-    }
-
-
-def index_has_expired(index, expire):
-    details = extract_index_details(index)
-    oldest = datetime.datetime.today().replace(
-        day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc
-    ) - relativedelta(months=expire)
-    index_datetime = datetime.datetime.fromisoformat(details["month"]).replace(
-        tzinfo=datetime.timezone.utc
-    )
-    return oldest > index_datetime
+from repo.fix_and_verify import BASE_REGEX, INDEX_REGEX, ALIAS_REGEX_MAPPING, POLICY_MAPPING, expected_index_template, \
+    extract_index_details, index_has_expired, generate_past_month_starts
+from utils import xcom_pull, xcom_push, http_hook_put, http_hook_post, http_hook_get
 
 
 def chain_on_success(func):
@@ -134,7 +18,9 @@ def chain_on_success(func):
         if not context["success"]:
             return context
         return func(context)
+
     return wrapper
+
 
 def chain_on_error_in_stage(stage):
     def decorator(func):
@@ -143,61 +29,10 @@ def chain_on_error_in_stage(stage):
             if context["success"] or context["stage"] != stage:
                 return context
             return func(context)
+
         return wrapper
+
     return decorator
-
-
-def xcom_pull(task_id: str, key: str) -> Any:
-    context = get_current_context()
-    ti = context["ti"]
-    print(f"xcom_pull {task_id} {key}")
-    return ti.xcom_pull(task_ids=task_id, key=key)
-
-
-def xcom_push(key: str, value: Any) -> None:
-    context = get_current_context()
-    ti = context["ti"]
-    print(f"xcom_push {key} {value}")
-    ti.xcom_push(key, value)
-
-
-def generate_past_month_starts(n):
-    current_month_start = datetime.datetime.today().replace(
-        day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc
-    ) - relativedelta(months=n-1)
-    return [current_month_start + relativedelta(months=i) for i in range(n+1)]
-
-
-def http_hook_put(conn_id: str, endpoint: str, data: str):
-    hook_put = HttpHook(method="PUT", http_conn_id=conn_id)
-    response = hook_put.run(
-        endpoint=f"/{endpoint}?pretty",
-        headers={"Content-Type": "application/json"},
-        data=data,
-    )
-    hook_put.check_response(response)
-    return response.json()
-
-
-def http_hook_post(conn_id: str, endpoint: str, data: str):
-    hook_post = HttpHook(method="POST", http_conn_id=conn_id)
-    response = hook_post.run(
-        endpoint=f"/{endpoint}?pretty",
-        headers={"Content-Type": "application/json"},
-        data=data,
-    )
-    hook_post.check_response(response)
-    return response.json()
-
-
-def http_hook_get(conn_id: str, endpoint: str):
-    hook_get = HttpHook(method="GET", http_conn_id=conn_id)
-    response = hook_get.run(
-        endpoint=endpoint,
-        headers={"Accept": "application/json"},
-    )
-    hook_get.check_response(response)
-    return response.json()
 
 
 class Context(TypedDict, total=False):
@@ -289,11 +124,6 @@ def create_index(context, index, payload):
     render_template_as_native_obj=True,
 )
 def fix_and_verify_dag():
-    def _filter_and_push(results, filter_fn) -> None:
-        for k, v in results.items():
-            if filter_fn(k):
-                xcom_push(k, v)
-
     @task
     def report(upstream: List[Context], stage: str) -> None:
         errors = [x for x in upstream if not x["success"]]
@@ -348,7 +178,9 @@ def fix_and_verify_dag():
                 data[0]["conn_id"],
                 "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
             )
-            _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
+            for k, v in results.items():
+                if INDEX_REGEX.match(k):
+                    xcom_push(k, v)
             return data
 
         @task
@@ -398,10 +230,9 @@ def fix_and_verify_dag():
         @task
         def fetch(data: List[Context]) -> List[Context]:
             results = http_hook_get(data[0]["conn_id"], "/_index_template/*-rollover")
-            _filter_and_push(
-                {r["name"]: r["index_template"] for r in results["index_templates"]},
-                lambda x: ALIAS_REGEX_MAPPING["rollover"].match(x),
-            )
+            for r in results["index_templates"]:
+                if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
+                    xcom_push(r["name"], r["index_template"])
             return data
 
         @task
@@ -542,7 +373,7 @@ def fix_and_verify_dag():
             for index, r in results.items():
                 details = extract_index_details(index)
                 alias = details["write_alias"]
-                if index_has_expired(index=index, expire=retention):
+                if index_has_expired(index=index, retention=retention):
                     continue
                 is_write = r["aliases"].get(alias, {}).get("is_write_index")
                 active_aliases[alias].append((index, is_write))
@@ -677,7 +508,7 @@ def fix_and_verify_dag():
                 pprint.pprint(c, indent=2)
 
     initial_context = Context(
-        conn_id="{{ params.db_conn }}", dry_run="{{ params.dry_run }}"
+        conn_id="{{ params.db_conn }}", dry_run=bool("{{ params.dry_run }}")
     )
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
