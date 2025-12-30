@@ -134,8 +134,17 @@ def chain_on_success(func):
         if not context["success"]:
             return context
         return func(context)
-
     return wrapper
+
+def chain_on_error_in_stage(stage):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(context):
+            if context["success"] or context["stage"] != stage:
+                return context
+            return func(context)
+        return wrapper
+    return decorator
 
 
 def xcom_pull(task_id: str, key: str) -> Any:
@@ -441,9 +450,8 @@ def fix_and_verify_dag():
             return success(context=context, stage=tg_stage)
 
         @task
+        @chain_on_error_in_stage(stage=tg_stage)
         def fix(context: Context) -> Context:
-            if context["success"] or context["stage"] != tg_stage:
-                return context
 
             suffix = context["latest_suffix"]
 
@@ -503,10 +511,8 @@ def fix_and_verify_dag():
             return success(context=context, stage=tg_stage)
 
         @task
+        @chain_on_error_in_stage(stage=tg_stage)
         def fix(context: Context) -> Context:
-            if context["success"] or context["stage"] != tg_stage:
-                return context
-
             alias = context["tenant"]
             actions = [
                 {"add": {"index": index, "alias": alias, "is_write_index": False}}
@@ -559,9 +565,8 @@ def fix_and_verify_dag():
             return success(context=context, stage=tg_stage)
 
         @task
+        @chain_on_error_in_stage(stage=tg_stage)
         def fix(context: Context) -> Context:
-            if context["success"] or context["stage"] != tg_stage:
-                return context
             actions = []
             for alias, indices in context["error"].items():
                 if any(i[1] is True for i in indices):
@@ -640,9 +645,8 @@ def fix_and_verify_dag():
             return failure(context=context, stage=tg_stage, error=needs_fixing)
 
         @task
+        @chain_on_error_in_stage(stage=tg_stage)
         def fix(context: Context) -> Context:
-            if context["success"] or context["stage"] != tg_stage:
-                return context
 
             alias = f"{context['tenant']}-rollover"
             actions = [
