@@ -540,6 +540,7 @@ def fix_and_verify_dag():
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)
+    te = expired_indices(upstream=t3)
     t5 = read_alias(upstream=t4)
     t6 = write_alias(upstream=t5)
     t7 = rollover_alias(upstream=t6)
