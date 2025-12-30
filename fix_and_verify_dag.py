@@ -544,7 +544,7 @@ def fix_and_verify_dag():
                 pprint.pprint(c, indent=2)
 
     initial_context = Context(
-        conn_id="{{ params.db_conn }}", dry_run=bool("{{ params.dry_run }}")
+        conn_id="{{ params.db_conn }}", dry_run="{{ params.dry_run }}"
     )
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
