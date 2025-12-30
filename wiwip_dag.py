@@ -508,14 +508,18 @@ def wiwip_dag():
                 return context
             actions = []
             for alias, indices in context["error"].items():
-                latest_index = max([i[0] for i in indices], key=lambda i: extract_index_details(i)["suffix"])
+                if any(i[1] is True for i in indices):
+                    write_index = [i[0] for i in indices if i[1] is True][0]
+                else:
+                    write_index = max([i[0] for i in indices], key=lambda i: extract_index_details(i)["suffix"])
+
                 for index, _ in indices:
                     actions.append(
                         {
                             "add": {
                                 "index": index,
                                 "alias": alias,
-                                "is_write_index": latest_index == index,
+                                "is_write_index": write_index == index,
                             }
                         }
                     )
