@@ -1,92 +1,50 @@
-import functools
-import json
-from typing import TypedDict, Optional, Any, List
+from typing import Any
 
-from airflow.decorators import task
 from airflow.operators.python import get_current_context
+from airflow.providers.http.hooks.http import HttpHook
 
 
-class Result(TypedDict):
-    success: bool
-    key: str
-    error: Optional[str]
-    value: Optional[Any]
-
-def success(key: str, value: Any) -> Result:
-    return Result(success=True, key=key, error=None, value=value)
-
-def failure(key: str, error: str, value: Any = None) -> Result:
-    return Result(success=False, key=key, error=error, value=value)
-
-def chain_on_success(func):
-    """
-    Decorator for functional pipelines.
-
-    It checks the 'success' key in the single positional argument (data dict).
-    If 'data["success"]' is False, it immediately returns the data dictionary,
-    short-circuiting the execution chain.
-    """
-
-    @functools.wraps(func)
-    def wrapper(data):
-        # Check for the failure condition at the beginning of the function
-        if not data["success"]:
-            return data
-
-        # If success is True, execute the decorated function
-        return func(data)
-
-    return wrapper
-
-@task
-def filter_empty(data: List[Result]):
-    results = [d for d in data if d["success"] and d["value"]]
-    print(f"Filtering {len(data) - len(results)} empty successes.")
-    return results
-
-@task
-def filter_errors(data: List[Result]):
-    errors = [d for d in data if not d["success"]]
-    for e in errors:
-        print(f"Error: {e['key']} - {e['value']}")
-    results = [d for d in data if d["success"]]
-    print(f"Collected {len(results)} successes.")
-    return results
-
-@task
-def print_errors(data: List[Result]):
-    results = {d['key']: d['error'] for d in data if not d["success"]}
-    print(f"Errors found: {len(results)}")
-    print(json.dumps(results, indent=2))
-    return results
-
-@task
-def report_errors(stages: List[str]):
-    for stage in stages:
-        errors = retrieve(stage, "errors")
-        print(f"Errors in '{stage}' stage: {len(errors)}")
-        print(json.dumps({e["key"]: e["error"] for e in errors}, indent=2))
-    return
-
-@task(task_id="push")
-def push(data: List[Result]):
+def xcom_pull(task_id: str, key: str) -> Any:
     context = get_current_context()
     ti = context["ti"]
-
-    errors = [d for d in data if not d["success"]]
-    print(f"Errors found: {len(errors)}/{len(data)}")
-    ti.xcom_push("errors", errors)
-
-    results = [d for d in data if d["success"]]
-    print(f"Pushing {len(results)}/{len(data)} successes.")
-    for r in results:
-        ti.xcom_push(r["key"], r["value"])
-
-    return [success(key=r["key"], value=None) for r in results]
+    print(f"xcom_pull {task_id} {key}")
+    return ti.xcom_pull(task_ids=task_id, key=key)
 
 
-def retrieve(stage: str, key: str):
+def xcom_push(key: str, value: Any) -> None:
     context = get_current_context()
     ti = context["ti"]
-    return ti.xcom_pull(task_ids=f"{stage}.push", key=key)
+    print(f"xcom_push {key} {value}")
+    ti.xcom_push(key, value)
 
+
+def http_hook_put(conn_id: str, endpoint: str, data: str):
+    hook_put = HttpHook(method="PUT", http_conn_id=conn_id)
+    response = hook_put.run(
+        endpoint=f"/{endpoint}?pretty",
+        headers={"Content-Type": "application/json"},
+        data=data,
+    )
+    hook_put.check_response(response)
+    return response.json()
+
+
+def http_hook_post(conn_id: str, endpoint: str, data: str):
+    hook_post = HttpHook(method="POST", http_conn_id=conn_id)
+    response = hook_post.run(
+        endpoint=f"/{endpoint}?pretty",
+        headers={"Content-Type": "application/json"},
+        data=data,
+    )
+    hook_post.check_response(response)
+    return response.json()
+
+
+def http_hook_get(conn_id: str, endpoint: str):
+    hook_get = HttpHook(method="GET", http_conn_id=conn_id)
+    response = hook_get.run(
+        endpoint=endpoint,
+        headers={"Accept": "application/json"},
+    )
+    hook_get.check_response(response)
+    return response.json()
