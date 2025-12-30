@@ -445,9 +445,10 @@ def fix_and_verify_dag():
             if context["success"] or context["stage"] != tg_stage:
                 return context
 
-            suffix = context["latest_suffix"] + 1
+            suffix = context["latest_suffix"]
 
             for month_start in context["error"]:
+                suffix += 1
                 origination_date = int(month_start.timestamp() * 1e3)
                 index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-{suffix:06}'
                 details = extract_index_details(index)
@@ -459,9 +460,7 @@ def fix_and_verify_dag():
                         details["rollover_alias"]: {"is_write_index": False},
                     },
                 }
-
                 create_index(context, index, payload)
-                suffix += 1
 
             context.update({"latest_suffix": suffix})
             return success(context=context, stage=tg_stage)
