@@ -208,7 +208,7 @@ def success(
         {
             "success": True,
             "stage": stage,
-            "value": value if value is not None else context.get("value"),
+            "value": value,
         }
     )
     return context
@@ -221,7 +221,7 @@ def failure(
         {
             "success": False,
             "stage": stage,
-            "error": error if error is not None else context.get("error"),
+            "error": error,
         }
     )
     return context
