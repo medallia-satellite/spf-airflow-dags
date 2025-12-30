@@ -252,8 +252,6 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     },
 )
 def wiwip_dag():
-    dry_run = True
-
     def _filter_and_push(results, filter_fn) -> None:
         for k, v in results.items():
             if filter_fn(k):
@@ -433,7 +431,7 @@ def wiwip_dag():
                         details["rollover_alias"]: {"is_write_index": False},
                     },
                 }
-                if dry_run:
+                if context["dry_run"]:
                     print(f"Dry run: {index} - {payload}")
                     continue
                 response = http_hook_put(context["conn_id"], index, json.dumps(payload))
@@ -467,6 +465,34 @@ def wiwip_dag():
                 return failure(
                     context=context, stage=tg_stage, error=list(indices - read_indices)
                 )
+            return success(context=context, stage=tg_stage)
+
+        @task
+        def fix(context: Context) -> Context:
+            if context["success"] or context["stage"] != tg_stage:
+                return context
+            actions = []
+            alias = context["tenant"]
+            for index in context["error"]:
+                actions.append(
+                    {
+                        "add": {
+                            "index": index,
+                            "alias": alias,
+                            "is_write_index": False,
+                        }
+                    }
+                )
+
+            if context["dry_run"]:
+                print(f"{context['tenant']}: {actions}")
+                return success(context=context, stage=tg_stage)
+
+            http_hook_post(
+                context["conn_id"],
+                "/_aliases/",
+                json.dumps({"actions": actions}),
+            )
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch.expand(context=upstream))
@@ -528,9 +554,8 @@ def wiwip_dag():
                             }
                         }
                     )
-            print(actions)
 
-            if dry_run:
+            if context["dry_run"]:
                 print(f"{context['tenant']}: {actions}")
                 return success(context=context, stage=tg_stage)
 
@@ -621,7 +646,7 @@ def wiwip_dag():
                 ]
             print(f"{context['tenant']}: {actions}")
 
-            if dry_run:
+            if context["dry_run"]:
                 print(f"{context['tenant']}: {actions}")
                 return success(context=context, stage=tg_stage)
 
@@ -690,7 +715,7 @@ def wiwip_dag():
                     }
                 )
 
-            if dry_run:
+            if context["dry_run"]:
                 print(f"{context['tenant']}: {actions}")
                 return success(context=context, stage=tg_stage)
 
