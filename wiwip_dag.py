@@ -209,6 +209,7 @@ def success(
             "success": True,
             "stage": stage,
             "value": value,
+            "error": None,
         }
     )
     return context
@@ -221,6 +222,7 @@ def failure(
         {
             "success": False,
             "stage": stage,
+            "value": None,
             "error": error,
         }
     )
