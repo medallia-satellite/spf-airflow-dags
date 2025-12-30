@@ -105,7 +105,7 @@ def extract_index_details(index):
     return {
         "tenant": tenant,
         "tenant_id": m["tenant_id"],
-        "suffix": m["suffix"],
+        "suffix": int(m["suffix"]),
         "month": month,
         "read_alias": tenant,
         "rollover_alias": f"{tenant}-rollover",
@@ -199,6 +199,7 @@ class Context(TypedDict, total=False):
     stage: Optional[str]
     value: Optional[Any]
     retention: Optional[int]
+    latest_suffix: Optional[int]
     conn_id: str
     dry_run: bool
 
@@ -315,11 +316,13 @@ def fix_and_verify_dag():
         grouped = []
         for k, v in results.items():
             xcom_push(k[0], v)
+            latest_suffix = max([extract_index_details(i)["suffix"] for i in v])
             grouped.append(
                 Context(
                     success=True,
                     tenant=k[0],
                     tenant_id=k[1],
+                    latest_suffix=latest_suffix,
                     conn_id=context["conn_id"],
                     dry_run=context["dry_run"],
                 )
@@ -442,11 +445,11 @@ def fix_and_verify_dag():
             if context["success"] or context["stage"] != tg_stage:
                 return context
 
-            for month_start in context["error"]:
-                suffix = f"{0:06}"
-                origination_date = int(month_start.timestamp() * 1e3)
+            suffix = context["latest_suffix"] + 1
 
-                index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-{suffix}'
+            for month_start in context["error"]:
+                origination_date = int(month_start.timestamp() * 1e3)
+                index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-{suffix:06}'
                 details = extract_index_details(index)
                 payload = {
                     "settings": {"index.lifecycle.origination_date": origination_date},
@@ -458,8 +461,9 @@ def fix_and_verify_dag():
                 }
 
                 create_index(context, index, payload)
+                suffix += 1
 
-
+            context.update({"latest_suffix": suffix})
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=upstream)
