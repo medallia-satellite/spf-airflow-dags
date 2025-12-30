@@ -330,9 +330,19 @@ def fix_and_verify_dag():
             if expired:
                 return failure(context=context, stage=tg_stage, error=expired)
             return success(context=context, stage=tg_stage)
+
+        @task
+        @chain_on_error_in_stage(stage=tg_stage)
+        def fix(context: Context) -> Context:
+
+            for index in context["error"]:
+                print(index)
+            return success(context=context, stage=tg_stage)
+
+
         verified = verify.expand(context=upstream)
         report(upstream=verified, stage=tg_stage)
-        return verified
+        return fix.expand(context=verified)
 
     @task_group
     def read_alias(upstream: List[Context]) -> List[Context]:
