@@ -641,7 +641,7 @@ def wiwip_dag():
                 print(f'{c["tenant"]} - {c["stage"]}:')
                 pprint.pprint(c, indent=2)
 
-    initial_context = Context(conn_id="{{ params.db_conn }}", dry_run=bool("{{ params.dry_run }}"))
+    initial_context = Context(conn_id="{{ params.db_conn }}", dry_run="{{ params.dry_run }}")
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
