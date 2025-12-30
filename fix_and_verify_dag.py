@@ -9,7 +9,7 @@ from airflow.models import Param
 
 from repo.fix_and_verify import BASE_REGEX, INDEX_REGEX, ALIAS_REGEX_MAPPING, POLICY_MAPPING, expected_index_template, \
     extract_index_details, index_has_expired, generate_past_month_starts
-from utils import xcom_pull, xcom_push, http_hook_put, http_hook_post, http_hook_get
+from repo.utils import xcom_pull, xcom_push, http_hook_put, http_hook_post, http_hook_get
 
 
 def chain_on_success(func):
