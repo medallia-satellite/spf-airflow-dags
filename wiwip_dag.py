@@ -249,6 +249,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
         "db_conn": Param("es-testing", type="string"),
         "dry_run": Param(True, type="boolean"),
     },
+    render_template_as_native_obj=True,
 )
 def wiwip_dag():
     def _filter_and_push(results, filter_fn) -> None:
