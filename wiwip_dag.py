@@ -484,7 +484,8 @@ def wiwip_dag():
                 alias = details["write_alias"]
                 if index_has_expired(index=index, expire=retention):
                     continue
-                active_aliases[alias].append((index, r["aliases"].get(alias, {}).get("is_write_index")))
+                is_write = r["aliases"].get(alias, {}).get("is_write_index")
+                active_aliases[alias].append((index, is_write))
 
             return success(context=context, stage=tg_stage, value=active_aliases)
 
