@@ -204,30 +204,27 @@ class Context(TypedDict, total=False):
 def success(
     context: Context, stage: str, value: Any = None,
 ) -> Context:
-    return Context(
-        tenant=context["tenant"],
-        tenant_id=context["tenant_id"],
-        success=True,
-        stage=stage,
-        value=value if value is not None else context.get("value"),
-        conn_id=context.get("conn_id"),
-        dry_run=context.get("dry_run"),
-        retention=context.get("retention"),
+    context.update(
+        {
+            "success": True,
+            "stage": stage,
+            "value": value if value is not None else context.get("value"),
+        }
     )
+    return context
 
 
 def failure(
     context: Context, stage: str, error: Any = None,
 ) -> Context:
-    return Context(
-        tenant=context["tenant"],
-        tenant_id=context["tenant_id"],
-        success=False,
-        stage=stage,
-        error=error if error is not None else context.get("error"),
-        conn_id=context.get("conn_id"),
-        retention=context.get("retention"),
+    context.update(
+        {
+            "success": False,
+            "stage": stage,
+            "error": error if error is not None else context.get("error"),
+        }
     )
+    return context
 
 
 def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
@@ -294,6 +291,7 @@ def wiwip_dag():
                     tenant=k[0],
                     tenant_id=k[1],
                     conn_id=context["conn_id"],
+                    dry_run=context["dry_run"],
                 )
             )
         return grouped
@@ -344,15 +342,8 @@ def wiwip_dag():
                     stage=tg_stage,
                     error=f"Invalid rollover alias {rollover}",
                 )
-
-            return Context(
-                tenant=context["tenant"],
-                tenant_id=context["tenant_id"],
-                conn_id=context["conn_id"],
-                stage=tg_stage,
-                success=True,
-                retention=retention[0],
-            )
+            context.update({"retention": retention[0]})
+            return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch(upstream))
         report(upstream=verified, stage=tg_stage)
