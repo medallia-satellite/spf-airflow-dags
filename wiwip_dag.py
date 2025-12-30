@@ -193,7 +193,7 @@ class Context(TypedDict, total=False):
     tenant: str
     tenant_id: int
     success: bool
-    error: Optional[str]
+    error: Optional[Any]
     stage: Optional[str]
     value: Optional[Any]
     retention: Optional[int]
@@ -208,7 +208,7 @@ def success(
         tenant_id=context["tenant_id"],
         success=True,
         stage=stage,
-        value=value if value else context.get("value"),
+        value=value if value is not None else context.get("value"),
         conn_id=conn_id if conn_id else context.get("conn_id"),
         retention=context.get("retention"),
     )
@@ -493,9 +493,11 @@ def wiwip_dag():
         @chain_on_success
         def verify(context: Context) -> Context:
             fetched = context["value"]
-            missing = []
+            missing = {}
             print(fetched)
-
+            for alias, indices in context["value"].items():
+                if any(i[1] is None for i in indices) or not any(i[1] is True for i in indices):
+                    missing[alias] = indices
             if missing:
                 return failure(context=context, stage=tg_stage, error=missing)
             return success(context=context, stage=tg_stage)
@@ -505,6 +507,20 @@ def wiwip_dag():
             if context["success"] or context["stage"] != tg_stage:
                 return context
             actions = []
+            for alias, indices in context["error"].items():
+                latest_index = max([i[0] for i in indices], key=lambda i: extract_index_details(i)["suffix"])
+                for index, _ in indices:
+                    actions.append(
+                        {
+                            "add": {
+                                "index": index,
+                                "alias": alias,
+                                "is_write_index": latest_index == index,
+                            }
+                        }
+                    )
+            print(actions)
+
             return context
 
 
