@@ -487,7 +487,7 @@ def wiwip_dag():
 
         verified = verify.expand(context=fetch.expand(context=upstream))
         report(upstream=verified, stage=tg_stage)
-        return verified
+        return fix.expand(context=verified)
 
     @task_group
     def write_alias(upstream: List[Context]) -> List[Context]:
