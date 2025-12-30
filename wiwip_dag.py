@@ -293,7 +293,6 @@ def wiwip_dag():
                     success=True,
                     tenant=k[0],
                     tenant_id=k[1],
-                    stage=context["stage"],
                     conn_id=context["conn_id"],
                 )
             )
@@ -571,96 +570,6 @@ def wiwip_dag():
         report(upstream=verified, stage=tg_stage)
         return fix.expand(context=verified)
 
-
-    @task_group
-    def aliases(upstream: List[Context]) -> List[Context]:
-        tg_stage = "aliases"
-
-        @task
-        def fetch(data: List[Context]) -> List[Context]:
-            # fetch in alias
-
-            results = http_hook_get(data[0]["conn_id"], "/_aliases")
-            _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
-            return data
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-
-            active_indices = []
-            for month_start in generate_past_month_starts(context["retention"]):
-                active_indices += [
-                    index
-                    for index in indices
-                    if f'{context["tenant"]}-{month_start:%Y-%m-%d}' in index
-                ]
-
-            missing = []
-            for index in active_indices:
-                index_aliases = (
-                    xcom_pull("aliases.fetch", index).get("aliases", dict()).keys()
-                )
-                if not all(
-                    [
-                        any(r.fullmatch(alias) for alias in index_aliases)
-                        for r in ALIAS_REGEX_MAPPING.values()
-                    ]
-                ):
-                    missing.append(index)
-
-            if missing:
-                return failure(context=context, stage=tg_stage, error=missing)
-            return success(context=context, stage=tg_stage)
-
-        @task
-        def fix(context: Context) -> Context:
-            if context["success"] or context["stage"] != tg_stage:
-                return context
-            actions = []
-            for index in context["error"]:
-                details = extract_index_details(index)
-                actions += [
-                    {
-                        "add": {
-                            "index": index,
-                            "alias": details["read_alias"],
-                            "is_write_index": False,
-                        }
-                    },
-                    {
-                        "add": {
-                            "index": index,
-                            "alias": details["write_alias"],
-                            "is_write_index": True,
-                        }
-                    },
-                    {
-                        "add": {
-                            "index": index,
-                            "alias": details["rollover_alias"],
-                            "is_write_index": details["should_rollover"],
-                        }
-                    },
-                ]
-            print(f"{context['tenant']}: {actions}")
-
-            if context["dry_run"]:
-                print(f"{context['tenant']}: {actions}")
-                return success(context=context, stage=tg_stage)
-
-            response = http_hook_post(
-                context["conn_id"], "/_aliases", json.dumps({"actions": actions})
-            )
-            print(response)
-
-            return success(context=context, stage=tg_stage)
-
-        verified = verify.expand(context=fetch(upstream))
-        report(upstream=verified, stage=tg_stage)
-        return fix.expand(context=verified)
-
     @task_group
     def rollover_alias(upstream: List[Context]) -> List[Context]:
         tg_stage = "rollover_alias"
@@ -743,12 +652,11 @@ def wiwip_dag():
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
-    tt = read_alias(upstream=t3)
-    tw = write_alias(upstream=tt)
-    t4 = monthly_indices(upstream=tw)
-    t5 = aliases(upstream=t4)
-    t6 = rollover_alias(upstream=t5)
-    print_errors(upstream=t6)
+    t4 = monthly_indices(upstream=t3)
+    t5 = read_alias(upstream=t4)
+    t6 = write_alias(upstream=t5)
+    t7 = rollover_alias(upstream=t6)
+    print_errors(upstream=t7)
 
 
 wiwip_dag()
