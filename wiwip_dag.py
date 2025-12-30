@@ -589,6 +589,7 @@ def wiwip_dag():
             for index in indices_in_read_alias:
                 if index not in indices_in_rollover_alias:
                     needs_fixing.append(index)
+                    continue
                 details = extract_index_details(index)
 
                 if indices_in_rollover_alias[index] and details["should_rollover"]:
