@@ -415,9 +415,11 @@ def wiwip_dag():
                 return context
 
             for month_start in context["error"]:
-                index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-0'
-                details = extract_index_details(index)
+                suffix = f"{0:06}"
                 origination_date = int(month_start.timestamp() * 1e3)
+
+                index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-{suffix}'
+                details = extract_index_details(index)
                 payload = {
                     "settings": {"index.lifecycle.origination_date": origination_date},
                     "aliases": {
@@ -479,10 +481,10 @@ def wiwip_dag():
 
             for index, r in results.items():
                 details = extract_index_details(index)
-
+                alias = details["write_alias"]
                 if index_has_expired(index=index, expire=retention):
                     continue
-                active_aliases[details["write_alias"]].append(r["aliases"].get(details["write_alias"]))
+                active_aliases[alias].append((index, r["aliases"].get(alias, {}).get("is_write_index")))
 
             return success(context=context, stage=tg_stage, value=active_aliases)
 
