@@ -475,11 +475,12 @@ def wiwip_dag():
         def fetch(context: Context) -> Context:
             results = http_hook_get(conn_id=context["conn_id"], endpoint=f'/{context["tenant"]}/_alias')
             active_aliases = defaultdict(list)
+            retention = context["retention"]
 
             for index, r in results.items():
                 details = extract_index_details(index)
 
-                if index_has_expired(index=index, expire=r["retention"]):
+                if index_has_expired(index=index, expire=retention):
                     continue
                 active_aliases[details["write_alias"]].append(r["aliases"].get(details["write_alias"]))
 
