@@ -7,8 +7,16 @@ from typing import TypedDict, Optional, Any, List, Tuple
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
 
-from repo.fix_and_verify import BASE_REGEX, INDEX_REGEX, ALIAS_REGEX_MAPPING, POLICY_MAPPING, expected_index_template, \
-    extract_index_details, index_has_expired, generate_past_month_starts
+from repo.fix_and_verify import (
+    BASE_REGEX,
+    INDEX_REGEX,
+    ALIAS_REGEX_MAPPING,
+    POLICY_MAPPING,
+    expected_index_template,
+    extract_index_details,
+    index_has_expired,
+    generate_past_month_starts,
+)
 from repo.utils import xcom_pull, xcom_push, http_hook_put, http_hook_post, http_hook_get
 
 
@@ -307,6 +315,24 @@ def fix_and_verify_dag():
         verified = verify.expand(context=upstream)
         report(upstream=verified, stage=tg_stage)
         return fix.expand(context=verified)
+
+    @task_group
+    def expired_indices(upstream: List[Context]) -> List[Context]:
+        tg_stage = "expired_indices"
+        @task
+        @chain_on_success
+        def verify(context: Context) -> Context:
+            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
+            expired = []
+            for index in indices:
+                if index_has_expired(index, context["retention"]):
+                    expired.append(index)
+            if expired:
+                return failure(context=context, stage=tg_stage, error=expired)
+            return success(context=context, stage=tg_stage)
+        verified = verify.expand(context=upstream)
+        report(upstream=verified, stage=tg_stage)
+        return verified
 
     @task_group
     def read_alias(upstream: List[Context]) -> List[Context]:
