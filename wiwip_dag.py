@@ -122,7 +122,9 @@ def index_has_expired(index, expire):
     oldest = datetime.datetime.today().replace(
         day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc
     ) - relativedelta(months=expire)
-    index_datetime = datetime.datetime.fromisoformat(details["month"]).replace(tzinfo=datetime.timezone.utc)
+    index_datetime = datetime.datetime.fromisoformat(details["month"]).replace(
+        tzinfo=datetime.timezone.utc
+    )
     return oldest > index_datetime
 
 
@@ -202,7 +204,9 @@ class Context(TypedDict, total=False):
 
 
 def success(
-    context: Context, stage: str, value: Any = None,
+    context: Context,
+    stage: str,
+    value: Any = None,
 ) -> Context:
     context.update(
         {
@@ -216,7 +220,9 @@ def success(
 
 
 def failure(
-    context: Context, stage: str, error: Any = None,
+    context: Context,
+    stage: str,
+    error: Any = None,
 ) -> Context:
     context.update(
         {
@@ -233,10 +239,23 @@ def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, boo
     results = http_hook_get(conn_id, f"/_cat/aliases/{alias}")
     return [(i["index"], i["alias"], i["is_write_index"] == "true") for i in results]
 
+
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     results = http_hook_get(conn_id, f"/_cat/indices/{prefix}*?h=index&format=json")
     return [r["index"] for r in results]
 
+
+def post_aliases_actions(context, actions):
+    if context["dry_run"]:
+        print(f"{context['tenant']}: {actions}")
+        return
+
+    response = http_hook_post(
+        context["conn_id"],
+        "/_aliases/",
+        json.dumps({"actions": actions}),
+    )
+    print(response)
 
 
 @dag(
@@ -398,7 +417,12 @@ def wiwip_dag():
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
             missing = []
             for month_start in generate_past_month_starts(context["retention"]):
-                if not any(index.startswith(f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}') for index in indices):
+                if not any(
+                    index.startswith(
+                        f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}'
+                    )
+                    for index in indices
+                ):
                     missing.append(month_start)
 
             if missing:
@@ -444,10 +468,19 @@ def wiwip_dag():
         @chain_on_success
         def fetch(context: Context) -> Context:
             tenant = context["tenant"]
-            return success(context=context, stage=tg_stage, value={
-                "read_indices": [i for i, _, _ in fetch_indices_in_alias(alias=tenant, conn_id=context["conn_id"])],
-                "indices": fetch_indices(prefix=tenant, conn_id=context["conn_id"]),
-            })
+            return success(
+                context=context,
+                stage=tg_stage,
+                value={
+                    "read_indices": [
+                        i
+                        for i, _, _ in fetch_indices_in_alias(
+                            alias=tenant, conn_id=context["conn_id"]
+                        )
+                    ],
+                    "indices": fetch_indices(prefix=tenant, conn_id=context["conn_id"]),
+                },
+            )
 
         @task
         @chain_on_success
@@ -464,28 +497,14 @@ def wiwip_dag():
         def fix(context: Context) -> Context:
             if context["success"] or context["stage"] != tg_stage:
                 return context
-            actions = []
+
             alias = context["tenant"]
-            for index in context["error"]:
-                actions.append(
-                    {
-                        "add": {
-                            "index": index,
-                            "alias": alias,
-                            "is_write_index": False,
-                        }
-                    }
-                )
+            actions = [
+                {"add": {"index": index, "alias": alias, "is_write_index": False}}
+                for index in context["error"]
+            ]
 
-            if context["dry_run"]:
-                print(f"{context['tenant']}: {actions}")
-                return success(context=context, stage=tg_stage)
-
-            http_hook_post(
-                context["conn_id"],
-                "/_aliases/",
-                json.dumps({"actions": actions}),
-            )
+            post_aliases_actions(context=context, actions=actions)
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch.expand(context=upstream))
@@ -499,7 +518,9 @@ def wiwip_dag():
         @task
         @chain_on_success
         def fetch(context: Context) -> Context:
-            results = http_hook_get(conn_id=context["conn_id"], endpoint=f'/{context["tenant"]}/_alias')
+            results = http_hook_get(
+                conn_id=context["conn_id"], endpoint=f'/{context["tenant"]}/_alias'
+            )
             active_aliases = defaultdict(list)
             retention = context["retention"]
 
@@ -520,7 +541,9 @@ def wiwip_dag():
             missing = {}
             print(fetched)
             for alias, indices in context["value"].items():
-                if any(i[1] is None for i in indices) or not any(i[1] is True for i in indices):
+                if any(i[1] is None for i in indices) or not any(
+                    i[1] is True for i in indices
+                ):
                     missing[alias] = indices
             if missing:
                 return failure(context=context, stage=tg_stage, error=missing)
@@ -535,30 +558,23 @@ def wiwip_dag():
                 if any(i[1] is True for i in indices):
                     write_index = [i[0] for i in indices if i[1] is True][0]
                 else:
-                    write_index = max([i[0] for i in indices], key=lambda i: extract_index_details(i)["suffix"])
-
-                for index, _ in indices:
-                    actions.append(
-                        {
-                            "add": {
-                                "index": index,
-                                "alias": alias,
-                                "is_write_index": write_index == index,
-                            }
-                        }
+                    write_index = max(
+                        [i[0] for i in indices],
+                        key=lambda i: extract_index_details(i)["suffix"],
                     )
+                actions += [
+                    {
+                        "add": {
+                            "index": i,
+                            "alias": alias,
+                            "is_write_index": write_index == i,
+                        }
+                    }
+                    for i, _ in indices
+                ]
 
-            if context["dry_run"]:
-                print(f"{context['tenant']}: {actions}")
-                return success(context=context, stage=tg_stage)
-
-            http_hook_post(
-                context["conn_id"],
-                "/_aliases/",
-                json.dumps({"actions": actions}),
-            )
+            post_aliases_actions(context=context, actions=actions)
             return success(context=context, stage=tg_stage)
-
 
         verified = verify.expand(context=fetch.expand(context=upstream))
         report(upstream=verified, stage=tg_stage)
@@ -573,10 +589,24 @@ def wiwip_dag():
             if not context["success"]:
                 return context
             tenant = context["tenant"]
-            return success(context=context, stage=tg_stage, value={
-                "read_alias": [i for i, _, _ in fetch_indices_in_alias(alias=tenant, conn_id=context["conn_id"])],
-                "rollover_alias": {i: b for i, _, b in fetch_indices_in_alias(alias=f"{tenant}-rollover", conn_id=context["conn_id"])},
-            })
+            return success(
+                context=context,
+                stage=tg_stage,
+                value={
+                    "read_alias": [
+                        i
+                        for i, _, _ in fetch_indices_in_alias(
+                            alias=tenant, conn_id=context["conn_id"]
+                        )
+                    ],
+                    "rollover_alias": {
+                        i: b
+                        for i, _, b in fetch_indices_in_alias(
+                            alias=f"{tenant}-rollover", conn_id=context["conn_id"]
+                        )
+                    },
+                },
+            )
 
         @task
         @chain_on_success
@@ -606,33 +636,23 @@ def wiwip_dag():
                 return context
 
             alias = f"{context['tenant']}-rollover"
-            actions = []
-            for index in context["error"]:
-                details = extract_index_details(index)
-                actions.append(
-                    {
-                        "add": {
-                            "index": index,
-                            "alias": alias,
-                            "is_write_index": details["should_rollover"],
-                        }
+            actions = [
+                {
+                    "add": {
+                        "index": index,
+                        "alias": alias,
+                        "is_write_index": extract_index_details(index)[
+                            "should_rollover"
+                        ],
                     }
-                )
+                }
+                for index in context["error"]
+            ]
 
-            if context["dry_run"]:
-                print(f"{context['tenant']}: {actions}")
-                return success(context=context, stage=tg_stage)
-
-            http_hook_post(
-                context["conn_id"],
-                "/_aliases/",
-                json.dumps({"actions": actions}),
-            )
+            post_aliases_actions(context=context, actions=actions)
             return success(context=context, stage=tg_stage)
 
-        verified = verify.expand(
-            context=fetch.expand(context=upstream)
-        )
+        verified = verify.expand(context=fetch.expand(context=upstream))
         report(upstream=verified, stage=tg_stage)
         return fix.expand(context=verified)
 
@@ -643,7 +663,9 @@ def wiwip_dag():
                 print(f'{c["tenant"]} - {c["stage"]}:')
                 pprint.pprint(c, indent=2)
 
-    initial_context = Context(conn_id="{{ params.db_conn }}", dry_run="{{ params.dry_run }}")
+    initial_context = Context(
+        conn_id="{{ params.db_conn }}", dry_run="{{ params.dry_run }}"
+    )
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
