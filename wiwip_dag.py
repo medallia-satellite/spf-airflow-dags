@@ -117,6 +117,15 @@ def extract_index_details(index):
     }
 
 
+def index_has_expired(index, expire):
+    details = extract_index_details(index)
+    oldest = datetime.datetime.today().replace(
+        day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc
+    ) - relativedelta(months=expire)
+    index_datetime = datetime.datetime.fromisoformat(details["month"]).replace(tzinfo=datetime.timezone.utc)
+    return oldest > index_datetime
+
+
 def chain_on_success(func):
     @functools.wraps(func)
     def wrapper(context):
@@ -226,6 +235,7 @@ def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, boo
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     results = http_hook_get(conn_id, f"/_cat/indices/{prefix}*?h=index&format=json")
     return [r["index"] for r in results]
+
 
 
 @dag(
@@ -444,8 +454,8 @@ def wiwip_dag():
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
-            indices = context["value"]["indices"]
-            read_indices = context["value"]["read_indices"]
+            indices = set(context["value"]["indices"])
+            read_indices = set(context["value"]["read_indices"])
             if len(indices) != len(read_indices):
                 return failure(
                     context=context, stage=tg_stage, error=list(indices - read_indices)
@@ -460,6 +470,44 @@ def wiwip_dag():
     def write_alias(upstream: List[Context]) -> List[Context]:
         tg_stage = "write_alias"
 
+        @task
+        @chain_on_success
+        def fetch(context: Context) -> Context:
+            results = http_hook_get(conn_id=context["conn_id"], endpoint=f'/{context["tenant"]}/_alias')
+            active_aliases = defaultdict(list)
+
+            for index, r in results.items():
+                details = extract_index_details(index)
+
+                if index_has_expired(index=index, expire=r["retention"]):
+                    continue
+                active_aliases[details["write_alias"]].append(r["aliases"].get(details["write_alias"]))
+
+            return success(context=context, stage=tg_stage, value=active_aliases)
+
+        @task
+        @chain_on_success
+        def verify(context: Context) -> Context:
+            fetched = context["value"]
+            missing = []
+            print(fetched)
+
+            if missing:
+                return failure(context=context, stage=tg_stage, error=missing)
+            return success(context=context, stage=tg_stage)
+
+        @task
+        def fix(context: Context) -> Context:
+            if context["success"] or context["stage"] != tg_stage:
+                return context
+            actions = []
+            return context
+
+
+        verified = verify.expand(context=fetch(upstream))
+        report(upstream=verified, stage=tg_stage)
+        return fix.expand(context=verified)
+
 
     @task_group
     def aliases(upstream: List[Context]) -> List[Context]:
@@ -467,6 +515,8 @@ def wiwip_dag():
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
+            # fetch in alias
+
             results = http_hook_get(data[0]["conn_id"], "/_aliases")
             _filter_and_push(results, lambda x: INDEX_REGEX.match(x))
             return data
@@ -631,7 +681,8 @@ def wiwip_dag():
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
     tt = read_alias(upstream=t3)
-    t4 = monthly_indices(upstream=tt)
+    tw = write_alias(upstream=tt)
+    t4 = monthly_indices(upstream=tw)
     t5 = aliases(upstream=t4)
     t6 = rollover_alias(upstream=t5)
     print_errors(upstream=t6)
