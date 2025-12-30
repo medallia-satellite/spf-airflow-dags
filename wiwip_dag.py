@@ -248,7 +248,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     catchup=False,
     params={
         "db_conn": Param("es-testing", type="string"),
-        "dry_run": Param(True, type="bool"),
+        "dry_run": Param(True, type="boolean"),
     },
 )
 def wiwip_dag():
