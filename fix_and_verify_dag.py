@@ -202,12 +202,7 @@ def fix_and_verify_dag():
         @chain_on_success
         def verify(context: Context) -> Context:
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            il_list = []
-            for index in indices:
-                if s := xcom_pull("ilm_settings.fetch", index):
-                    il_list.append(s["settings"]["index"]["lifecycle"])
-                else:
-                    print(f"No settings for {index}")
+            il_list = [s["settings"]["index"]["lifecycle"] for index in indices if (s := xcom_pull("ilm_settings.fetch", index))]
 
             if len(indices) != len(il_list):
                 return failure(
@@ -216,22 +211,24 @@ def fix_and_verify_dag():
                     error="Some indices are missing ILM settings",
                 )
 
-            retention = list(set(POLICY_MAPPING.get(il.get("name")) for il in il_list))
-            if len(retention) != 1 or retention[0] not in POLICY_MAPPING.values():
+            policies = [il.get("name") for il in il_list]
+            rollover = [il.get("rollover_alias") for il in il_list]
+
+            if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1 or policies[0] not in POLICY_MAPPING:
                 return failure(
                     context=context,
                     stage=tg_stage,
-                    error=f'Invalid policies: {set(il.get("name") for il in il_list)}',
+                    error=f'Invalid policies: {set(policies)}',
                 )
 
-            rollover = set(il.get("rollover_alias") for il in il_list)
             if not all(r == f"{context['tenant']}-rollover" for r in rollover):
                 return failure(
                     context=context,
                     stage=tg_stage,
                     error=f"Invalid rollover alias {rollover}",
                 )
-            context.update({"retention": retention[0]})
+
+            context.update({"retention": POLICY_MAPPING[policies[0]]})
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch(upstream))
