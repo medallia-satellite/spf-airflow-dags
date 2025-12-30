@@ -198,10 +198,11 @@ class Context(TypedDict, total=False):
     value: Optional[Any]
     retention: Optional[int]
     conn_id: str
+    dry_run: bool
 
 
 def success(
-    context: Context, stage: str, value: Any = None, conn_id: str = ""
+    context: Context, stage: str, value: Any = None,
 ) -> Context:
     return Context(
         tenant=context["tenant"],
@@ -209,13 +210,14 @@ def success(
         success=True,
         stage=stage,
         value=value if value is not None else context.get("value"),
-        conn_id=conn_id if conn_id else context.get("conn_id"),
+        conn_id=context.get("conn_id"),
+        dry_run=context.get("dry_run"),
         retention=context.get("retention"),
     )
 
 
 def failure(
-    context: Context, stage: str, error: Any = None, conn_id: str = ""
+    context: Context, stage: str, error: Any = None,
 ) -> Context:
     return Context(
         tenant=context["tenant"],
@@ -223,7 +225,7 @@ def failure(
         success=False,
         stage=stage,
         error=error if error is not None else context.get("error"),
-        conn_id=conn_id if conn_id else context.get("conn_id"),
+        conn_id=context.get("conn_id"),
         retention=context.get("retention"),
     )
 
@@ -244,7 +246,10 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     description="This DAG verifies monthly indices.",
     max_active_runs=1,
     catchup=False,
-    params={"db_conn": Param("es-testing", type="string")},
+    params={
+        "db_conn": Param("es-testing", type="string"),
+        "dry_run": Param(True, type="bool"),
+    },
 )
 def wiwip_dag():
     dry_run = True
@@ -270,8 +275,8 @@ def wiwip_dag():
                 pprint.pprint(c)
 
     @task
-    def fetch_indices_per_tenant(conn_id: str, stage: str = "") -> List[Context]:
-        fetched = http_hook_get(conn_id, "/_cat/indices?h=index&format=json")
+    def fetch_indices_per_tenant(context: Context) -> List[Context]:
+        fetched = http_hook_get(context["conn_id"], "/_cat/indices?h=index&format=json")
         print(fetched)
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
@@ -287,11 +292,11 @@ def wiwip_dag():
             xcom_push(k[0], v)
             grouped.append(
                 Context(
+                    success=True,
                     tenant=k[0],
                     tenant_id=k[1],
-                    stage=stage,
-                    success=True,
-                    conn_id=conn_id,
+                    stage=context["stage"],
+                    conn_id=context["conn_id"],
                 )
             )
         return grouped
@@ -525,7 +530,16 @@ def wiwip_dag():
                     )
             print(actions)
 
-            return context
+            if dry_run:
+                print(f"{context['tenant']}: {actions}")
+                return success(context=context, stage=tg_stage)
+
+            http_hook_post(
+                context["conn_id"],
+                "/_aliases/",
+                json.dumps({"actions": actions}),
+            )
+            return success(context=context, stage=tg_stage)
 
 
         verified = verify.expand(context=fetch.expand(context=upstream))
@@ -682,7 +696,7 @@ def wiwip_dag():
 
             http_hook_post(
                 context["conn_id"],
-                f"/_aliases/{alias}",
+                "/_aliases/",
                 json.dumps({"actions": actions}),
             )
             return success(context=context, stage=tg_stage)
@@ -700,8 +714,8 @@ def wiwip_dag():
                 print(f'{c["tenant"]} - {c["stage"]}:')
                 pprint.pprint(c, indent=2)
 
-    connection_id = "{{ params.db_conn }}"
-    t1 = fetch_indices_per_tenant(conn_id=connection_id)
+    initial_context = Context(conn_id="{{ params.db_conn }}", dry_run=bool("{{ params.dry_run }}"))
+    t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
     tt = read_alias(upstream=t3)
