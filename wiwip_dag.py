@@ -504,7 +504,7 @@ def wiwip_dag():
             return context
 
 
-        verified = verify.expand(context=fetch(upstream))
+        verified = verify.expand(context=fetch.expand(context=upstream))
         report(upstream=verified, stage=tg_stage)
         return fix.expand(context=verified)
 
