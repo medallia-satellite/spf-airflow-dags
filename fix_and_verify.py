@@ -155,7 +155,7 @@ def xcom_push(key: str, value: Any) -> None:
 def generate_past_month_starts(n):
     current_month_start = datetime.datetime.today().replace(
         day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc
-    ) - relativedelta(months=n)
+    ) - relativedelta(months=n-1)
     return [current_month_start + relativedelta(months=i) for i in range(n+1)]
 
 
