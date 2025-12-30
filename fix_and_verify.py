@@ -119,5 +119,5 @@ def index_has_expired(index, retention):
 def generate_past_month_starts(n):
     current_month_start = datetime.datetime.today().replace(
         day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc
-    ) - relativedelta(months=n + 1)
+    ) - relativedelta(months=n - 1)
     return [current_month_start + relativedelta(months=i) for i in range(n + 1)]

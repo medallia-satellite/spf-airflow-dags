@@ -118,6 +118,13 @@ def create_index(context, index, payload):
     response = http_hook_put(context["conn_id"], index, json.dumps(payload))
     print(f"{index}: {response}")
 
+def update_index_settings(context, index, payload):
+    if context["dry_run"]:
+        print(f"Dry run: {index} - {payload}")
+        return
+    response = http_hook_put(context["conn_id"], f"{index}/_settings", json.dumps(payload))
+    print(f"{index}: {response}")
+
 
 @dag(
     dag_display_name="Fix & Verify",
@@ -336,7 +343,7 @@ def fix_and_verify_dag():
         def fix(context: Context) -> Context:
 
             for index in context["error"]:
-                print(index)
+                update_index_settings(context, index, {"index.lifecycle.indexing_complete": True})
             return success(context=context, stage=tg_stage)
 
 
