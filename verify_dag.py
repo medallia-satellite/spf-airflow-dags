@@ -208,8 +208,9 @@ def verify_dag():
             # deferrable=True, # Use this for Airflow 2.2+ instead of wait_for_completion for efficiency
             # execution_date='{{ ds }}', # Pass the parent's execution date if needed
         ).expand(conf=report(upstream=verified, stage=tg_stage))
-
-        return verified
+        t = wait_for_completion(upstream=verified)
+        trigger_child >> t
+        return t
 
     @task_group
     def expired_indices(upstream: List[Context]) -> List[Context]:
@@ -388,7 +389,7 @@ def verify_dag():
     t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)
     te = expired_indices(upstream=t3)
-    t5 = read_alias(upstream=wait_for_completion(upstream=t4))
+    t5 = read_alias(upstream=t4)
     t6 = write_alias(upstream=t5)
     t7 = rollover_alias(upstream=t6)
     print_errors(upstream=t7)
