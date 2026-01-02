@@ -148,7 +148,6 @@ def verify_dag():
                     tenant_id=k[1],
                     latest_suffix=latest_suffix,
                     conn_id=context["conn_id"],
-                    dry_run=context["dry_run"],
                 )
             )
         return grouped
@@ -421,8 +420,7 @@ def verify_dag():
     def print_errors(upstream: List[Context]) -> None:
 
         errors = [x for x in upstream if not x["success"]]
-        print(
-            f"""
+        print(f"""
         success: {len(upstream) - len(errors)}/{len(upstream)}
         errors: {len(errors)}/{len(upstream)}
         """
