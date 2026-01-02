@@ -83,10 +83,8 @@ def fix_monthly_indices_dag():
                     details["rollover_alias"]: {"is_write_index": False},
                 },
             }
-            print(f"Creating index: {index}\n{json.dumps(payload, indent=2)}")
-            if context["dry_run"]:
-                print(f"Dry run: {index} - {payload}")
-            else:
+            print(f"Creating index: {index} (dry-run={context['dry_run']})\n{json.dumps(payload, indent=2)}")
+            if not context["dry_run"]:
                 response = create_index(index, payload, context["conn_id"])
                 print(f"{index}: {response}")
 
