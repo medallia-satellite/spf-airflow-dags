@@ -204,6 +204,7 @@ def verify_dag():
             task_id='trigger_child_dag',
             trigger_dag_id='fix_monthly_indices_dag',  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
+            poke_interval=15,
             # deferrable=True, # Use this for Airflow 2.2+ instead of wait_for_completion for efficiency
             # execution_date='{{ ds }}', # Pass the parent's execution date if needed
         ).expand(conf=report(upstream=verified, stage=tg_stage))
