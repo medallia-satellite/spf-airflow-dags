@@ -53,7 +53,6 @@ class Context(TypedDict, total=False):
     retention: Optional[int]
     latest_suffix: Optional[int]
     conn_id: str
-    dry_run: bool
 
 
 def success(
@@ -98,34 +97,6 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     return [r["index"] for r in results]
 
 
-def update_aliases(context, actions):
-    if context["dry_run"]:
-        print(f"{context['tenant']}: {actions}")
-        return
-
-    response = http_hook_post(
-        context["conn_id"],
-        "/_aliases/",
-        json.dumps({"actions": actions}),
-    )
-    print(response)
-
-
-def create_index(context, index, payload):
-    if context["dry_run"]:
-        print(f"Dry run: {index} - {payload}")
-        return
-    response = http_hook_put(context["conn_id"], index, json.dumps(payload))
-    print(f"{index}: {response}")
-
-def update_index_settings(context, index, payload):
-    if context["dry_run"]:
-        print(f"Dry run: {index} - {payload}")
-        return
-    response = http_hook_put(context["conn_id"], f"{index}/_settings", json.dumps(payload))
-    print(f"{index}: {response}")
-
-
 @dag(
     dag_display_name="Verify",
     tags=["spf", "elasticsearch"],
@@ -134,7 +105,6 @@ def update_index_settings(context, index, payload):
     catchup=False,
     params={
         "db_conn": Param("es-testing", type="string"),
-        "dry_run": Param(True, type="boolean"),
     },
     render_template_as_native_obj=True,
 )
@@ -455,7 +425,7 @@ def verify_dag():
                 pprint.pprint(c, indent=2)
 
     initial_context = Context(
-        conn_id="{{ params.db_conn }}", dry_run="{{ params.dry_run }}"
+        conn_id="{{ params.db_conn }}"
     )
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
