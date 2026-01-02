@@ -74,7 +74,7 @@ def fix_monthly_indices_dag():
     def fix(context: Context) -> None:
         suffix = context["latest_suffix"]
 
-        for month_start in context["value"]:
+        for month_start in context["error"]:
             suffix += 1
             origination_date = int(month_start.timestamp() * 1e3)
             index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-{suffix:06}'
