@@ -15,12 +15,8 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     results = http_hook_get(conn_id, f"/_cat/indices/{prefix}*?h=index&format=json")
     return [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
 
-def create_index(context, index, payload):
-    if context["dry_run"]:
-        print(f"Dry run: {index} - {payload}")
-        return
-    response = http_hook_put(context["conn_id"], index, json.dumps(payload))
-    print(f"{index}: {response}")
+def create_index(index, payload, conn_id):
+    return http_hook_put(conn_id, index, json.dumps(payload))
 
 
 @dag(
@@ -87,7 +83,12 @@ def fix_monthly_indices_dag():
                     details["rollover_alias"]: {"is_write_index": False},
                 },
             }
-            create_index(context, index, payload)
+            print(f"Creating index: {index}\n{json.dumps(payload, indent=2)}")
+            if context["dry_run"]:
+                print(f"Dry run: {index} - {payload}")
+            else:
+                response = create_index(index, payload, context["conn_id"])
+                print(f"{index}: {response}")
 
     initial_context = Context(
         tenant="{{ params.tenant }}",
