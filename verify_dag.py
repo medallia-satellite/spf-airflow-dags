@@ -181,7 +181,6 @@ def verify_dag():
         @chain_on_success
         def verify(context: Context) -> Context:
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            missing = []
             for month_start in generate_past_month_starts(context["retention"]):
                 if not any(
                     index.startswith(
@@ -189,10 +188,7 @@ def verify_dag():
                     )
                     for index in indices
                 ):
-                    missing.append(month_start)
-
-            if missing:
-                return failure(context=context, stage=tg_stage, error=missing)
+                    return failure(context=context, stage=tg_stage)
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=upstream)
