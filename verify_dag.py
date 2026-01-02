@@ -419,10 +419,21 @@ def verify_dag():
 
     @task
     def print_errors(upstream: List[Context]) -> None:
-        for c in upstream:
+
+        errors = [x for x in upstream if not x["success"]]
+        print(
+            f"""
+        success: {len(upstream) - len(errors)}/{len(upstream)}
+        errors: {len(errors)}/{len(upstream)}
+        """
+        )
+
+        for i, c in enumerate(upstream):
             if not c["success"]:
-                print(f'{c["tenant"]} - {c["stage"]}:')
-                pprint.pprint(c, indent=2)
+                print(f"""
+                {c["tenant"]} - {c["stage"]}:
+                {pprint.pformat(c["error"], indent=2)}
+                """)
 
     initial_context = Context(
         conn_id="{{ params.db_conn }}"
