@@ -42,7 +42,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
 )
 def verify_dag():
     @task
-    def report(upstream: List[Context], stage: str) -> None:
+    def report(upstream: List[Context], stage: str) -> List[Context]:
         errors = [x for x in upstream if not x["success"]]
         print(
             f"""
@@ -55,6 +55,7 @@ def verify_dag():
             if not c["success"] and c["stage"] == stage:
                 print(f"{i}: {c['tenant']}")
                 pprint.pprint(c)
+        return errors
 
     @task
     def fetch_indices_per_tenant(context: Context) -> List[Context]:
@@ -194,14 +195,14 @@ def verify_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=upstream)
-        report(upstream=verified, stage=tg_stage)
+
         trigger_child = TriggerDagRunOperator.partial(
             task_id='trigger_child_dag',
             trigger_dag_id='fix_monthly_indices_dag',  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             # deferrable=True, # Use this for Airflow 2.2+ instead of wait_for_completion for efficiency
             # execution_date='{{ ds }}', # Pass the parent's execution date if needed
-        ).expand(conf=verified)
+        ).expand(conf=report(upstream=verified, stage=tg_stage))
 
         return verified
 
