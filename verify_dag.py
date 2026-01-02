@@ -82,6 +82,7 @@ def verify_dag():
                     tenant_id=k[1],
                     latest_suffix=latest_suffix,
                     conn_id=context["conn_id"],
+                    dry_run=context["dry_run"],
                 )
             )
         return grouped
