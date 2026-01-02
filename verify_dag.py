@@ -44,7 +44,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     render_template_as_native_obj=True,
 )
 def verify_dag():
-    @task(trigger_rule="all_success")
+    @task(trigger_rule="none_failed")
     def wait_for_completion(upstream: List[Context]) -> List[Context]:
         return upstream
 
@@ -201,7 +201,7 @@ def verify_dag():
         verified = verify.expand(context=upstream)
 
         trigger_child = TriggerDagRunOperator.partial(
-            task_id='trigger_child_dag',
+            task_id='trigger_fix_monthly_indices_dag',
             trigger_dag_id='fix_monthly_indices_dag',  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=15,
