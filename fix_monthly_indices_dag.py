@@ -33,8 +33,8 @@ def create_index(context, index, payload):
     params={
         "db_conn": Param("es-testing", type="string"),
         "dry_run": Param(True, type="boolean"),
-        "tenant": Param(type="string"),
-        "tenant_id": Param(type="integer"),
+        "tenant": Param("spftesting_topic-builder-spf.medallia.com-spftesting", type="string"),
+        "tenant_id": Param(12345, type="integer"),
 
     },
     render_template_as_native_obj=True,
