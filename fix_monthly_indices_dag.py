@@ -35,7 +35,7 @@ def create_index(context, index, payload):
         "dry_run": Param(True, type="boolean"),
         "tenant": Param("spftesting_topic-builder-spf.medallia.com-spftesting", type="string"),
         "tenant_id": Param(12345, type="integer"),
-
+        "retention": Param(6, type="integer"),
     },
     render_template_as_native_obj=True,
 )
@@ -92,6 +92,7 @@ def fix_monthly_indices_dag():
     initial_context = Context(
         tenant="{{ params.tenant }}",
         tenant_id="{{ params.tenant_id }}",
+        retention="{{ params.retention }}",
         conn_id="{{ params.db_conn }}",
         dry_run="{{ params.dry_run }}",
     )
