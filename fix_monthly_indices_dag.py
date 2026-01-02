@@ -70,7 +70,7 @@ def fix_monthly_indices_dag():
         return success(context=context, stage="verify")
 
     @task
-    @chain_on_error_in_stage
+    @chain_on_error_in_stage(stage="verify")
     def fix(context: Context) -> None:
         suffix = context["latest_suffix"]
 
