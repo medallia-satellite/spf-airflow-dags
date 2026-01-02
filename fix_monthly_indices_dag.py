@@ -86,7 +86,7 @@ def fix_monthly_indices_dag():
             print(f"Creating index: {index} (dry-run={context['dry_run']})\n{json.dumps(payload, indent=2)}")
             if not context["dry_run"]:
                 response = create_index(index, payload, context["conn_id"])
-                print(f"{index}\n{json.dumps(response, indent=2)}")
+                print(f"Response:\n{json.dumps(response, indent=2)}")
 
     initial_context = Context(
         tenant="{{ params.tenant }}",
