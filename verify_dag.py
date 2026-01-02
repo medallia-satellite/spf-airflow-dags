@@ -2,8 +2,10 @@ import pprint
 from collections import defaultdict
 from typing import List, Tuple
 
+from airflow.cli.commands.task_command import task_list
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
+from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from repo.fix_and_verify import (
@@ -42,6 +44,10 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     render_template_as_native_obj=True,
 )
 def verify_dag():
+    @task(trigger_rule="all_success")
+    def wait_for_completion(upstream: List[Context]) -> List[Context]:
+        return upstream
+
     @task
     def report(upstream: List[Context], stage: str) -> List[Context]:
         errors = [x for x in upstream if not x["success"]]
@@ -381,7 +387,7 @@ def verify_dag():
     t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)
     te = expired_indices(upstream=t3)
-    t5 = read_alias(upstream=t4)
+    t5 = read_alias(upstream=wait_for_completion(upstream=t4))
     t6 = write_alias(upstream=t5)
     t7 = rollover_alias(upstream=t6)
     print_errors(upstream=t7)
