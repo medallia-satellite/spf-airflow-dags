@@ -1,8 +1,7 @@
-import functools
 import json
 import pprint
 from collections import defaultdict
-from typing import TypedDict, Optional, Any, List, Tuple
+from typing import List, Tuple
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
@@ -15,77 +14,9 @@ from repo.fix_and_verify import (
     expected_index_template,
     extract_index_details,
     index_has_expired,
-    generate_past_month_starts,
+    generate_past_month_starts, chain_on_success, chain_on_error_in_stage, Context, success, failure,
 )
 from repo.utils import xcom_pull, xcom_push, http_hook_put, http_hook_post, http_hook_get
-
-
-def chain_on_success(func):
-    @functools.wraps(func)
-    def wrapper(context):
-        if not context["success"]:
-            return context
-        return func(context)
-
-    return wrapper
-
-
-def chain_on_error_in_stage(stage):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(context):
-            if context["success"] or context["stage"] != stage:
-                return context
-            return func(context)
-
-        return wrapper
-
-    return decorator
-
-
-class Context(TypedDict, total=False):
-    tenant: str
-    tenant_id: int
-    success: bool
-    error: Optional[Any]
-    stage: Optional[str]
-    value: Optional[Any]
-    retention: Optional[int]
-    latest_suffix: Optional[int]
-    conn_id: str
-    dry_run: bool
-
-
-def success(
-    context: Context,
-    stage: str,
-    value: Any = None,
-) -> Context:
-    context.update(
-        {
-            "success": True,
-            "stage": stage,
-            "value": value,
-            "error": None,
-        }
-    )
-    return context
-
-
-def failure(
-    context: Context,
-    stage: str,
-    error: Any = None,
-) -> Context:
-    context.update(
-        {
-            "success": False,
-            "stage": stage,
-            "value": None,
-            "error": error,
-        }
-    )
-    return context
 
 
 def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
@@ -338,7 +269,7 @@ def fix_and_verify_dag():
         @task
         @chain_on_error_in_stage(stage=tg_stage)
         def fix(context: Context) -> Context:
-
+            # Marking indexing as completed unblocks ILMs retention lifecycle when rollovers are performed manually.
             for index in context["error"]:
                 update_index_settings(context, index, {"index.lifecycle.indexing_complete": True})
             return success(context=context, stage=tg_stage)
