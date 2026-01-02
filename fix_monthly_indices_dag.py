@@ -7,10 +7,9 @@ from airflow.models import Param
 from repo.fix_and_verify import (
     INDEX_REGEX,
     extract_index_details,
-    generate_past_month_starts, Context, success, failure,
+    generate_past_month_starts, Context, success, failure, chain_on_error_in_stage,
 )
 from repo.utils import http_hook_put, http_hook_get
-
 
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     results = http_hook_get(conn_id, f"/_cat/indices/{prefix}*?h=index&format=json")
@@ -71,6 +70,7 @@ def fix_monthly_indices_dag():
         return success(context=context, stage="verify")
 
     @task
+    @chain_on_error_in_stage
     def fix(context: Context) -> None:
         suffix = context["latest_suffix"]
 
