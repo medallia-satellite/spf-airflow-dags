@@ -65,7 +65,7 @@ def verify_dag():
             results[
                 (
                     BASE_REGEX.search(index).group(0),
-                    INDEX_REGEX.fullmatch(index).groupdict()["tenant_id"],
+                    int(INDEX_REGEX.fullmatch(index).groupdict()["tenant_id"]),
                 )
             ].append(index)
 
