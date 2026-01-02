@@ -4,6 +4,7 @@ from typing import List, Tuple
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from repo.fix_and_verify import (
     BASE_REGEX,
@@ -194,6 +195,14 @@ def verify_dag():
 
         verified = verify.expand(context=upstream)
         report(upstream=verified, stage=tg_stage)
+        trigger_child = TriggerDagRunOperator.partial(
+            task_id='trigger_child_dag',
+            trigger_dag_id='fix_monthly_indices_dag',  # The DAG ID to trigger
+            wait_for_completion=True,  # Wait for the child DAG to finish
+            # deferrable=True, # Use this for Airflow 2.2+ instead of wait_for_completion for efficiency
+            # execution_date='{{ ds }}', # Pass the parent's execution date if needed
+        ).expand(conf=verified)
+
         return verified
 
     @task_group
