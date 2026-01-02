@@ -47,7 +47,7 @@ def fix_monthly_indices_dag():
         latest_suffix = 0
         for index in fetched:
             m = INDEX_REGEX.fullmatch(index).groupdict()
-            assert m["tenant_id"] == context["tenant_id"], f"{index}: {m['tenant_id']} != {context['tenant_id']}"
+            assert int(m["tenant_id"]) == context["tenant_id"], f"{index}: {m['tenant_id']} != {context['tenant_id']}"
             latest_suffix = max(latest_suffix, int(m["suffix"]))
 
         context.update({"latest_suffix": latest_suffix})
