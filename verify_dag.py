@@ -2,10 +2,8 @@ import pprint
 from collections import defaultdict
 from typing import List, Tuple
 
-from airflow.cli.commands.task_command import task_list
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
-from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from repo.fix_and_verify import (
@@ -16,7 +14,11 @@ from repo.fix_and_verify import (
     expected_index_template,
     extract_index_details,
     index_has_expired,
-    generate_past_month_starts, Context, chain_on_success, failure, success,
+    generate_past_month_starts,
+    Context,
+    chain_on_success,
+    failure,
+    success,
 )
 from repo.utils import xcom_pull, xcom_push, http_hook_get
 
@@ -112,7 +114,11 @@ def verify_dag():
         @chain_on_success
         def verify(context: Context) -> Context:
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            il_list = [s["settings"]["index"]["lifecycle"] for index in indices if (s := xcom_pull("ilm_settings.fetch", index))]
+            il_list = [
+                s["settings"]["index"]["lifecycle"]
+                for index in indices
+                if (s := xcom_pull("ilm_settings.fetch", index))
+            ]
 
             if len(indices) != len(il_list):
                 return failure(
@@ -124,11 +130,14 @@ def verify_dag():
             policies = [il.get("name") for il in il_list]
             rollover = [il.get("rollover_alias") for il in il_list]
 
-            if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1 or policies[0] not in POLICY_MAPPING:
+            if (
+                len(set(POLICY_MAPPING.get(p) for p in policies)) != 1
+                or policies[0] not in POLICY_MAPPING
+            ):
                 return failure(
                     context=context,
                     stage=tg_stage,
-                    error=f'Invalid policies: {set(policies)}',
+                    error=f"Invalid policies: {set(policies)}",
                 )
 
             if not all(r == f"{context['tenant']}-rollover" for r in rollover):
@@ -201,12 +210,10 @@ def verify_dag():
         verified = verify.expand(context=upstream)
 
         trigger_child = TriggerDagRunOperator.partial(
-            task_id='trigger_fix_monthly_indices_dag',
-            trigger_dag_id='fix_monthly_indices_dag',  # The DAG ID to trigger
+            task_id="trigger_fix_monthly_indices_dag",
+            trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=15,
-            # deferrable=True, # Use this for Airflow 2.2+ instead of wait_for_completion for efficiency
-            # execution_date='{{ ds }}', # Pass the parent's execution date if needed
         ).expand(conf=report(upstream=verified, stage=tg_stage))
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
@@ -215,6 +222,7 @@ def verify_dag():
     @task_group
     def expired_indices(upstream: List[Context]) -> List[Context]:
         tg_stage = "expired_indices"
+
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
@@ -228,8 +236,16 @@ def verify_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=upstream)
-        report(upstream=verified, stage=tg_stage)
-        return verified
+
+        trigger_child = TriggerDagRunOperator.partial(
+            task_id="trigger_fix_expired_indices_dag",
+            trigger_dag_id="fix_expired_indices_dag",  # The DAG ID to trigger
+            wait_for_completion=True,  # Wait for the child DAG to finish
+            poke_interval=15,
+        ).expand(conf=report(upstream=verified, stage=tg_stage))
+        t = wait_for_completion(upstream=verified)
+        trigger_child >> t
+        return t
 
     @task_group
     def read_alias(upstream: List[Context]) -> List[Context]:
@@ -305,6 +321,7 @@ def verify_dag():
             if missing:
                 return failure(context=context, stage=tg_stage, error=missing)
             return success(context=context, stage=tg_stage)
+
         verified = verify.expand(context=fetch.expand(context=upstream))
         report(upstream=verified, stage=tg_stage)
         return verified
@@ -367,7 +384,8 @@ def verify_dag():
     def print_errors(upstream: List[Context]) -> None:
 
         errors = [x for x in upstream if not x["success"]]
-        print(f"""
+        print(
+            f"""
         success: {len(upstream) - len(errors)}/{len(upstream)}
         errors: {len(errors)}/{len(upstream)}
         """
@@ -375,10 +393,12 @@ def verify_dag():
 
         for i, c in enumerate(upstream):
             if not c["success"]:
-                print(f"""
+                print(
+                    f"""
                 {c["tenant"]} - {c["stage"]}:
                 {pprint.pformat(c["error"], indent=2)}
-                """)
+                """
+                )
 
     initial_context = Context(
         conn_id="{{ params.db_conn }}",
@@ -393,5 +413,6 @@ def verify_dag():
     t6 = write_alias(upstream=t5)
     t7 = rollover_alias(upstream=t6)
     print_errors(upstream=t7)
+
 
 verify_dag()

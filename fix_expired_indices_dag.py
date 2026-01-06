@@ -6,12 +6,11 @@ from airflow.models import Param
 
 from repo.fix_and_verify import (
     INDEX_REGEX,
-    extract_index_details,
-    generate_past_month_starts,
     Context,
     success,
     failure,
     chain_on_error_in_stage,
+    index_has_expired,
 )
 from repo.utils import http_hook_put, http_hook_get
 
@@ -25,8 +24,12 @@ def create_index(index, payload, conn_id):
     return http_hook_put(conn_id, index, json.dumps(payload))
 
 
+def update_index_settings(conn_id: str, index, payload):
+    return http_hook_put(conn_id, f"{index}/_settings", json.dumps(payload))
+
+
 @dag(
-    dag_display_name="Fix Monthly Indices",
+    dag_display_name="Fix Expired Indices",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     catchup=False,
@@ -41,7 +44,7 @@ def create_index(index, payload, conn_id):
     },
     render_template_as_native_obj=True,
 )
-def fix_monthly_indices_dag():
+def fix_expired_indices_dag():
     @task
     def fetch(context: Context) -> Context:
         tenant: str = context["tenant"]
@@ -60,43 +63,28 @@ def fix_monthly_indices_dag():
 
     @task
     def verify(context: Context) -> Context:
-        missing = []
-        for month_start in generate_past_month_starts(context["retention"]):
-            if not any(
-                index.startswith(
-                    f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}'
-                )
-                for index in context["value"]
-            ):
-                missing.append(month_start)
-
-        if missing:
-            return failure(context=context, error=missing, stage="verify")
+        expired = []
+        for index in context["value"]:
+            if index_has_expired(index, context["retention"]):
+                expired.append(index)
+        if expired:
+            return failure(context=context, stage="verify", error=expired)
         return success(context=context, stage="verify")
 
     @task
     @chain_on_error_in_stage(stage="verify")
-    def fix(context: Context) -> None:
-        suffix = context["latest_suffix"]
-
-        for month_start in context["error"]:
-            suffix += 1
-            origination_date = int(month_start.timestamp() * 1e3)
-            index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-{suffix:06}'
-            details = extract_index_details(index)
-            payload = {
-                "settings": {"index.lifecycle.origination_date": origination_date},
-                "aliases": {
-                    details["read_alias"]: {"is_write_index": False},
-                    details["write_alias"]: {"is_write_index": True},
-                    details["rollover_alias"]: {"is_write_index": False},
-                },
-            }
+    def fix(context: Context) -> Context:
+        # Marking indexing as completed unblocks ILMs retention lifecycle when rollovers are performed manually.
+        for index in context["error"]:
             print(
-                f"Creating index: {index} (dry-run={context['dry_run']})\n{json.dumps(payload, indent=2)}"
+                f"Marking indexing as completed (dry-run={context['dry_run']}): {index}"
             )
             if not context["dry_run"]:
-                response = create_index(index, payload, context["conn_id"])
+                response = update_index_settings(
+                    context["conn_id"],
+                    index,
+                    {"index.lifecycle.indexing_complete": True},
+                )
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
     initial_context = Context(
@@ -110,4 +98,4 @@ def fix_monthly_indices_dag():
     fix(verify(fetch(initial_context)))
 
 
-fix_monthly_indices_dag()
+fix_expired_indices_dag()

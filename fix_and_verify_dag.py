@@ -14,9 +14,20 @@ from repo.fix_and_verify import (
     expected_index_template,
     extract_index_details,
     index_has_expired,
-    generate_past_month_starts, chain_on_success, chain_on_error_in_stage, Context, success, failure,
+    generate_past_month_starts,
+    chain_on_success,
+    chain_on_error_in_stage,
+    Context,
+    success,
+    failure,
 )
-from repo.utils import xcom_pull, xcom_push, http_hook_put, http_hook_post, http_hook_get
+from repo.utils import (
+    xcom_pull,
+    xcom_push,
+    http_hook_put,
+    http_hook_post,
+    http_hook_get,
+)
 
 
 def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
@@ -49,11 +60,14 @@ def create_index(context, index, payload):
     response = http_hook_put(context["conn_id"], index, json.dumps(payload))
     print(f"{index}: {response}")
 
+
 def update_index_settings(context, index, payload):
     if context["dry_run"]:
         print(f"Dry run: {index} - {payload}")
         return
-    response = http_hook_put(context["conn_id"], f"{index}/_settings", json.dumps(payload))
+    response = http_hook_put(
+        context["conn_id"], f"{index}/_settings", json.dumps(payload)
+    )
     print(f"{index}: {response}")
 
 
@@ -133,7 +147,11 @@ def fix_and_verify_dag():
         @chain_on_success
         def verify(context: Context) -> Context:
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            il_list = [s["settings"]["index"]["lifecycle"] for index in indices if (s := xcom_pull("ilm_settings.fetch", index))]
+            il_list = [
+                s["settings"]["index"]["lifecycle"]
+                for index in indices
+                if (s := xcom_pull("ilm_settings.fetch", index))
+            ]
 
             if len(indices) != len(il_list):
                 return failure(
@@ -145,11 +163,14 @@ def fix_and_verify_dag():
             policies = [il.get("name") for il in il_list]
             rollover = [il.get("rollover_alias") for il in il_list]
 
-            if len(set(POLICY_MAPPING.get(p) for p in policies)) != 1 or policies[0] not in POLICY_MAPPING:
+            if (
+                len(set(POLICY_MAPPING.get(p) for p in policies)) != 1
+                or policies[0] not in POLICY_MAPPING
+            ):
                 return failure(
                     context=context,
                     stage=tg_stage,
-                    error=f'Invalid policies: {set(policies)}',
+                    error=f"Invalid policies: {set(policies)}",
                 )
 
             if not all(r == f"{context['tenant']}-rollover" for r in rollover):
@@ -254,6 +275,7 @@ def fix_and_verify_dag():
     @task_group
     def expired_indices(upstream: List[Context]) -> List[Context]:
         tg_stage = "expired_indices"
+
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
@@ -271,9 +293,10 @@ def fix_and_verify_dag():
         def fix(context: Context) -> Context:
             # Marking indexing as completed unblocks ILMs retention lifecycle when rollovers are performed manually.
             for index in context["error"]:
-                update_index_settings(context, index, {"index.lifecycle.indexing_complete": True})
+                update_index_settings(
+                    context, index, {"index.lifecycle.indexing_complete": True}
+                )
             return success(context=context, stage=tg_stage)
-
 
         verified = verify.expand(context=upstream)
         report(upstream=verified, stage=tg_stage)
