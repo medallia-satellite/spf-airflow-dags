@@ -108,7 +108,7 @@ def fix_aliases_dag():
                 active_aliases[alias].append({
                     "index": index,
                     "aliased": aliased,
-                    "is_write_index": False if not aliased else r["aliases"][alias]["is_write_index"] == "true",
+                    "is_write_index": False if not aliased else r["aliases"][alias]["is_write_index"],
                 })
 
             return success(context=context, stage=stage, value=active_aliases)
@@ -165,7 +165,7 @@ def fix_aliases_dag():
             read = fetch_indices(prefix=tenant, conn_id=context["conn_id"])
 
             results = http_hook_get(context["conn_id"], f"/_cat/aliases/{tenant}-rollover")
-            rollover = {r["index"]: r["is_write_index"] for r in results if INDEX_REGEX.match(r["index"])}
+            rollover = {r["index"]: r["is_write_index"] == "true" for r in results if INDEX_REGEX.match(r["index"])}
 
             return success(context=context, stage=stage, value={
                 "read": read,
