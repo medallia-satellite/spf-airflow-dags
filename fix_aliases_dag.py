@@ -108,7 +108,7 @@ def fix_aliases_dag():
                 active_aliases[alias].append({
                     "index": index,
                     "aliased": aliased,
-                    "is_write_index": False if not aliased else r["aliases"][alias]["is_write_index"],
+                    "is_write_index": False if not aliased else r["aliases"][alias]["is_write_index"] == "true",
                 })
 
             return success(context=context, stage=stage, value=active_aliases)
