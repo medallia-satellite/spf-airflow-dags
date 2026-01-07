@@ -248,6 +248,37 @@ def verify_dag():
         return t
 
     @task_group
+    def aliases(upstream: Context) -> List[Context]:
+        stage = "aliases"
+        @task
+        def fetch(context: Context) -> Context:
+            tenant = context["tenant"]
+            indices = fetch_indices(prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"])
+            alias_per_index = {i: [] for i in indices}
+            results = http_hook_get(context["conn_id"], f"/_cat/aliases/{tenant}*")
+            for r in results:
+                alias_per_index[r["index"]].append(r["alias"])
+            return success(context=context, stage=stage, value=alias_per_index)
+
+        @task
+        def verify(context: Context) -> Context:
+            if any(len(a) != 3 for a in context["value"].values()):
+                return failure(context=context, stage=stage)
+            return success(context=context, stage=stage)
+
+        verified = verify.expand(context=fetch.expand(context=upstream))
+
+        trigger_child = TriggerDagRunOperator.partial(
+            task_id="trigger_fix_aliases_dag",
+            trigger_dag_id="fix_aliases_dag",  # The DAG ID to trigger
+            wait_for_completion=True,  # Wait for the child DAG to finish
+            poke_interval=15,
+        ).expand(conf=report(upstream=verified, stage=stage))
+        t = wait_for_completion(upstream=verified)
+        trigger_child >> t
+        return t
+
+    @task_group
     def read_alias(upstream: List[Context]) -> List[Context]:
         tg_stage = "read_alias"
 
@@ -409,6 +440,7 @@ def verify_dag():
     t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)
     te = expired_indices(upstream=t3)
+    aliases(upstream=t4)
     t5 = read_alias(upstream=t4)
     t6 = write_alias(upstream=t5)
     t7 = rollover_alias(upstream=t6)
