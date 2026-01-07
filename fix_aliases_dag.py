@@ -4,7 +4,7 @@ from typing import List
 from airflow.decorators import dag, task, task_group
 from airflow.models import Param
 
-from fix_and_verify import (
+from repo.fix_and_verify import (
     INDEX_REGEX,
     Context,
     success,
@@ -12,7 +12,7 @@ from fix_and_verify import (
     chain_on_error_in_stage,
     index_has_expired,
 )
-from utils import http_hook_post, http_hook_get
+from repo.utils import http_hook_post, http_hook_get
 
 
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:
