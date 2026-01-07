@@ -164,7 +164,7 @@ def fix_aliases_dag():
         conn_id="{{ params.db_conn }}",
         dry_run="{{ params.dry_run }}",
     )
-    read_alias(upstream=initial_context)
+    write_alias(upstream=read_alias(upstream=initial_context))
 
 
 fix_aliases_dag()
