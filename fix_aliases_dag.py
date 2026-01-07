@@ -53,8 +53,8 @@ def fix_aliases_dag():
         def fetch(context: Context) -> Context:
             tenant: str = context["tenant"]
             discovered = fetch_indices(prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"])
-            aliased = fetch_indices(prefix=f"{tenant}", conn_id=context["conn_id"])
-            return success(context, tenant, value={
+            aliased = fetch_indices(prefix=tenant, conn_id=context["conn_id"])
+            return success(context=context, stage=stage, value={
                 "discovered": discovered,
                 "aliased": aliased,
             })
@@ -115,9 +115,7 @@ def fix_aliases_dag():
 
         @task
         def verify(context: Context) -> Context:
-            fetched = context["value"]
             missing = {}
-            print(fetched)
             for alias, indices in context["value"].items():
                 if any(i["aliased"] is False for i in indices) or not any(
                     i["is_write_index"] is True for i in indices
@@ -157,6 +155,68 @@ def fix_aliases_dag():
             return success(context=context, stage=stage)
 
         return fix(context=verify(context=fetch(context=upstream)))
+
+    @task_group
+    def rollover_alias(upstream: Context) -> Context:
+        stage = "rollover_alias"
+        @task
+        def fetch(context: Context) -> Context:
+            tenant: str = context["tenant"]
+            read = fetch_indices(prefix=tenant, conn_id=context["conn_id"])
+
+            results = http_hook_get(context["conn_id"], f"/_cat/aliases/{tenant}-rollover")
+            rollover = {r["index"]: r["is_write_index"] for r in results if INDEX_REGEX.match(r["index"])}
+
+            return success(context=context, stage=stage, value={
+                "read": read,
+                "rollover": rollover,
+            })
+
+        @task
+        def verify(context: Context) -> Context:
+            needs_fixing = []
+            read = context["value"]["read"]
+            rollover = context["value"]["rollover"]
+            for index in read:
+                if index not in rollover:
+                    needs_fixing.append(index)
+                    continue
+
+                details = extract_index_details(index)
+                if rollover[index] != details["should_rollover"]:
+                    needs_fixing.append(index)
+
+            if needs_fixing:
+                return failure(context=context, stage=stage, error=needs_fixing)
+            return success(context=context, stage=stage)
+
+        @task
+        @chain_on_error_in_stage(stage=stage)
+        def fix(context: Context) -> Context:
+            alias = f"{context['tenant']}-rollover"
+            actions = [
+                {
+                    "add": {
+                        "index": index,
+                        "alias": alias,
+                        "is_write_index": extract_index_details(index)[
+                            "should_rollover"
+                        ],
+                    }
+                }
+                for index in context["error"]
+            ]
+
+            print(f"Updating {context['tenant']} alias (dry-run={context['dry_run']})\n{json.dumps(actions, indent=2)}")
+            if not context["dry_run"]:
+                response = update_aliases(context=context, actions=actions)
+                print(f"Response:\n{json.dumps(response, indent=2)}")
+
+            return success(context=context, stage=stage)
+
+        return fix(context=verify(context=fetch(context=upstream)))
+
+
     initial_context = Context(
         tenant="{{ params.tenant }}",
         tenant_id="{{ params.tenant_id }}",
@@ -164,7 +224,7 @@ def fix_aliases_dag():
         conn_id="{{ params.db_conn }}",
         dry_run="{{ params.dry_run }}",
     )
-    write_alias(upstream=read_alias(upstream=initial_context))
+    rollover_alias(upstream=write_alias(upstream=read_alias(upstream=initial_context)))
 
 
 fix_aliases_dag()
