@@ -175,6 +175,25 @@ def es_index_deletion_unblocker_dag():
                 print(f"Response:\n{json.dumps(response, indent=2)}")
         return success(context=context, stage="verify")
 
+    @task
+    def print_errors(upstream: List[Context]) -> None:
+
+        errors = [x for x in upstream if not x["success"]]
+        print(
+            f"""
+        success: {len(upstream) - len(errors)}/{len(upstream)}
+        errors: {len(errors)}/{len(upstream)}
+        """
+        )
+
+        for i, c in enumerate(upstream):
+            if not c["success"]:
+                print(
+                    f"""
+                {c["tenant"]} - {c["stage"]}:
+                {pprint.pformat(c["error"], indent=2)}
+                """
+                )
 
     initial_context = Context(
         conn_id="{{ params.conn_id }}",
@@ -184,4 +203,5 @@ def es_index_deletion_unblocker_dag():
     t2 = ilm_settings(upstream=t1)
     te = fix.expand(context=verify.expand(context=t2))
     report(upstream=te, stage="verify")
+    print_errors(upstream=te)
 es_index_deletion_unblocker_dag()
