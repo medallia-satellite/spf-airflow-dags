@@ -51,6 +51,25 @@ def verify_dag():
         return upstream
 
     @task
+    def select_eligible_for_fix(upstream: List[Context], stage: str) -> List[Context]:
+        eligible_for_fix = []
+        for i, c in enumerate(upstream):
+            if not c["success"] and c["stage"] == stage:
+                print(f"{i}: {c['tenant']}")
+                eligible_for_fix.append(c)
+        errors = [x for x in upstream if not x["success"]]
+        print(
+            f"""
+
+            Summary
+                success: {len(upstream) - len(errors)}/{len(upstream)}
+                errors: {len(errors)}/{len(upstream)}
+                errors in stage {stage}: {len([e for e in errors if e["stage"] == stage])}/{len(errors)}
+                """
+        )
+        return eligible_for_fix
+
+    @task
     def report(upstream: List[Context], stage: str) -> List[Context]:
         errors = [x for x in upstream if not x["success"]]
         print(
@@ -214,7 +233,7 @@ def verify_dag():
             trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=15,
-        ).expand(conf=report(upstream=verified, stage=tg_stage))
+        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=tg_stage))
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
@@ -246,7 +265,7 @@ def verify_dag():
             trigger_dag_id="fix_aliases_dag",  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=15,
-        ).expand(conf=report(upstream=verified, stage=stage))
+        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
