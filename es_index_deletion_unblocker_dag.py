@@ -172,6 +172,7 @@ def es_index_deletion_unblocker_dag():
                     {"index.lifecycle.indexing_complete": True},
                 )
                 print(f"Response:\n{json.dumps(response, indent=2)}")
+        return success(context=context, stage="verify")
 
 
     initial_context = Context(
@@ -181,5 +182,5 @@ def es_index_deletion_unblocker_dag():
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
     te = fix.expand(context=verify.expand(context=t2))
-
+    report(upstream=te, stage="verify")
 es_index_deletion_unblocker_dag()
