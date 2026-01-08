@@ -243,6 +243,7 @@ def verify_dag():
     def aliases(upstream: Context) -> List[Context]:
         stage = "aliases"
         @task
+        @chain_on_success
         def fetch(context: Context) -> Context:
             tenant = context["tenant"]
             indices = fetch_indices(prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"])
@@ -253,6 +254,7 @@ def verify_dag():
             return success(context=context, stage=stage, value=alias_per_index)
 
         @task
+        @chain_on_success
         def verify(context: Context) -> Context:
             if any(len(a) != 3 for a in context["value"].values()):
                 return failure(context=context, stage=stage)
