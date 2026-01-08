@@ -12,12 +12,9 @@ from repo.fix_and_verify import (
     POLICY_MAPPING,
     extract_index_details,
     index_has_expired,
-    Context,
-    chain_on_success,
-    failure,
-    success, chain_on_error_in_stage,
 )
-from repo.utils import xcom_pull, xcom_push, http_hook_get, http_hook_put
+from repo.utils import xcom_pull, xcom_push, http_hook_get, http_hook_put, chain_on_success, chain_on_error_in_stage, \
+    Context, success, failure
 
 
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:

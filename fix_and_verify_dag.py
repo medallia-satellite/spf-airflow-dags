@@ -1,10 +1,10 @@
-import json
 import pprint
 from collections import defaultdict
 from typing import List, Tuple
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from repo.fix_and_verify import (
     BASE_REGEX,
@@ -13,21 +13,9 @@ from repo.fix_and_verify import (
     POLICY_MAPPING,
     expected_index_template,
     extract_index_details,
-    index_has_expired,
     generate_past_month_starts,
-    chain_on_success,
-    chain_on_error_in_stage,
-    Context,
-    success,
-    failure,
 )
-from repo.utils import (
-    xcom_pull,
-    xcom_push,
-    http_hook_put,
-    http_hook_post,
-    http_hook_get,
-)
+from repo.utils import xcom_pull, xcom_push, http_hook_get, chain_on_success, Context, success, failure
 
 
 def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
@@ -40,37 +28,6 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     return [r["index"] for r in results]
 
 
-def update_aliases(context, actions):
-    if context["dry_run"]:
-        print(f"{context['tenant']}: {actions}")
-        return
-
-    response = http_hook_post(
-        context["conn_id"],
-        "/_aliases/",
-        json.dumps({"actions": actions}),
-    )
-    print(response)
-
-
-def create_index(context, index, payload):
-    if context["dry_run"]:
-        print(f"Dry run: {index} - {payload}")
-        return
-    response = http_hook_put(context["conn_id"], index, json.dumps(payload))
-    print(f"{index}: {response}")
-
-
-def update_index_settings(context, index, payload):
-    if context["dry_run"]:
-        print(f"Dry run: {index} - {payload}")
-        return
-    response = http_hook_put(
-        context["conn_id"], f"{index}/_settings", json.dumps(payload)
-    )
-    print(f"{index}: {response}")
-
-
 @dag(
     dag_display_name="Fix & Verify",
     tags=["spf", "elasticsearch"],
@@ -78,14 +35,39 @@ def update_index_settings(context, index, payload):
     max_active_runs=1,
     catchup=False,
     params={
-        "db_conn": Param("es-testing", type="string"),
+        "conn_id": Param("es-testing", type="string"),
         "dry_run": Param(True, type="boolean"),
     },
     render_template_as_native_obj=True,
 )
-def fix_and_verify_dag():
+def verify_dag():
+    @task(trigger_rule="none_failed")
+    def wait_for_completion(upstream: List[Context]) -> List[Context]:
+        return upstream
+
     @task
-    def report(upstream: List[Context], stage: str) -> None:
+    def select_eligible_for_fix(upstream: List[Context], stage: str) -> List[Context]:
+        eligible_for_fix = []
+        for i, c in enumerate(upstream):
+            if not c["success"] and c["stage"] == stage:
+                print(f"{i}: {c['tenant']}")
+                pprint.pprint(c["error"], indent=2)
+                eligible_for_fix.append(c)
+        total = len(upstream)
+        errors = sum(1 for c in upstream if not c["success"])
+        print(
+            f"""
+
+            Summary
+                total success: {total - errors}/{total}
+                total errors: {errors}/{total}
+                    errors in stage '{stage}': {len(eligible_for_fix)}/{errors}
+            """
+        )
+        return eligible_for_fix
+
+    @task
+    def report(upstream: List[Context], stage: str) -> List[Context]:
         errors = [x for x in upstream if not x["success"]]
         print(
             f"""
@@ -98,6 +80,7 @@ def fix_and_verify_dag():
             if not c["success"] and c["stage"] == stage:
                 print(f"{i}: {c['tenant']}")
                 pprint.pprint(c)
+        return errors
 
     @task
     def fetch_indices_per_tenant(context: Context) -> List[Context]:
@@ -108,7 +91,7 @@ def fix_and_verify_dag():
             results[
                 (
                     BASE_REGEX.search(index).group(0),
-                    INDEX_REGEX.fullmatch(index).groupdict()["tenant_id"],
+                    int(INDEX_REGEX.fullmatch(index).groupdict()["tenant_id"]),
                 )
             ].append(index)
 
@@ -184,7 +167,7 @@ def fix_and_verify_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch(upstream))
-        report(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=tg_stage)
         return verified
 
     @task_group
@@ -219,7 +202,7 @@ def fix_and_verify_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch(upstream))
-        report(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=tg_stage)
         return verified
 
     @task_group
@@ -230,7 +213,6 @@ def fix_and_verify_dag():
         @chain_on_success
         def verify(context: Context) -> Context:
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            missing = []
             for month_start in generate_past_month_starts(context["retention"]):
                 if not any(
                     index.startswith(
@@ -238,281 +220,85 @@ def fix_and_verify_dag():
                     )
                     for index in indices
                 ):
-                    missing.append(month_start)
-
-            if missing:
-                return failure(context=context, stage=tg_stage, error=missing)
-            return success(context=context, stage=tg_stage)
-
-        @task
-        @chain_on_error_in_stage(stage=tg_stage)
-        def fix(context: Context) -> Context:
-
-            suffix = context["latest_suffix"]
-
-            for month_start in context["error"]:
-                suffix += 1
-                origination_date = int(month_start.timestamp() * 1e3)
-                index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-{suffix:06}'
-                details = extract_index_details(index)
-                payload = {
-                    "settings": {"index.lifecycle.origination_date": origination_date},
-                    "aliases": {
-                        details["read_alias"]: {"is_write_index": False},
-                        details["write_alias"]: {"is_write_index": True},
-                        details["rollover_alias"]: {"is_write_index": False},
-                    },
-                }
-                create_index(context, index, payload)
-
-            context.update({"latest_suffix": suffix})
+                    return failure(context=context, stage=tg_stage)
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=upstream)
-        report(upstream=verified, stage=tg_stage)
-        return fix.expand(context=verified)
+
+        trigger_child = TriggerDagRunOperator.partial(
+            task_id="trigger_fix_monthly_indices_dag",
+            trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
+            wait_for_completion=True,  # Wait for the child DAG to finish
+            poke_interval=15,
+        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=tg_stage))
+        t = wait_for_completion(upstream=verified)
+        trigger_child >> t
+        return t
+
 
     @task_group
-    def expired_indices(upstream: List[Context]) -> List[Context]:
-        tg_stage = "expired_indices"
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            expired = []
-            for index in indices:
-                if index_has_expired(index, context["retention"]):
-                    expired.append(index)
-            if expired:
-                return failure(context=context, stage=tg_stage, error=expired)
-            return success(context=context, stage=tg_stage)
-
-        @task
-        @chain_on_error_in_stage(stage=tg_stage)
-        def fix(context: Context) -> Context:
-            # Marking indexing as completed unblocks ILMs retention lifecycle when rollovers are performed manually.
-            for index in context["error"]:
-                update_index_settings(
-                    context, index, {"index.lifecycle.indexing_complete": True}
-                )
-            return success(context=context, stage=tg_stage)
-
-        verified = verify.expand(context=upstream)
-        report(upstream=verified, stage=tg_stage)
-        return fix.expand(context=verified)
-
-    @task_group
-    def read_alias(upstream: List[Context]) -> List[Context]:
-        tg_stage = "read_alias"
-
+    def aliases(upstream: Context) -> List[Context]:
+        stage = "aliases"
         @task
         @chain_on_success
         def fetch(context: Context) -> Context:
             tenant = context["tenant"]
-            return success(
-                context=context,
-                stage=tg_stage,
-                value={
-                    "read_indices": [
-                        i
-                        for i, _, _ in fetch_indices_in_alias(
-                            alias=tenant, conn_id=context["conn_id"]
-                        )
-                    ],
-                    "indices": fetch_indices(prefix=tenant, conn_id=context["conn_id"]),
-                },
-            )
+            indices = fetch_indices(prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"])
+            alias_per_index = {i: [] for i in indices}
+            results = http_hook_get(context["conn_id"], f"/_cat/aliases/{tenant}*")
+            for r in results:
+                alias_per_index[r["index"]].append(r["alias"])
+            return success(context=context, stage=stage, value=alias_per_index)
 
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
-            indices = set(context["value"]["indices"])
-            read_indices = set(context["value"]["read_indices"])
-            if len(indices) != len(read_indices):
-                return failure(
-                    context=context, stage=tg_stage, error=list(indices - read_indices)
-                )
-            return success(context=context, stage=tg_stage)
-
-        @task
-        @chain_on_error_in_stage(stage=tg_stage)
-        def fix(context: Context) -> Context:
-            alias = context["tenant"]
-            actions = [
-                {"add": {"index": index, "alias": alias, "is_write_index": False}}
-                for index in context["error"]
-            ]
-
-            update_aliases(context=context, actions=actions)
-            return success(context=context, stage=tg_stage)
+            if any(len(a) != 3 for a in context["value"].values()):
+                return failure(context=context, stage=stage)
+            return success(context=context, stage=stage)
 
         verified = verify.expand(context=fetch.expand(context=upstream))
-        report(upstream=verified, stage=tg_stage)
-        return fix.expand(context=verified)
 
-    @task_group
-    def write_alias(upstream: List[Context]) -> List[Context]:
-        tg_stage = "write_alias"
-
-        @task
-        @chain_on_success
-        def fetch(context: Context) -> Context:
-            results = http_hook_get(
-                conn_id=context["conn_id"], endpoint=f'/{context["tenant"]}/_alias'
-            )
-            active_aliases = defaultdict(list)
-            retention = context["retention"]
-
-            for index, r in results.items():
-                details = extract_index_details(index)
-                alias = details["write_alias"]
-                if index_has_expired(index=index, retention=retention):
-                    continue
-                is_write = r["aliases"].get(alias, {}).get("is_write_index")
-                active_aliases[alias].append((index, is_write))
-
-            return success(context=context, stage=tg_stage, value=active_aliases)
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            fetched = context["value"]
-            missing = {}
-            print(fetched)
-            for alias, indices in context["value"].items():
-                if any(i[1] is None for i in indices) or not any(
-                    i[1] is True for i in indices
-                ):
-                    missing[alias] = indices
-            if missing:
-                return failure(context=context, stage=tg_stage, error=missing)
-            return success(context=context, stage=tg_stage)
-
-        @task
-        @chain_on_error_in_stage(stage=tg_stage)
-        def fix(context: Context) -> Context:
-            actions = []
-            for alias, indices in context["error"].items():
-                if any(i[1] is True for i in indices):
-                    write_index = [i[0] for i in indices if i[1] is True][0]
-                else:
-                    write_index = max(
-                        [i[0] for i in indices],
-                        key=lambda i: extract_index_details(i)["suffix"],
-                    )
-                actions += [
-                    {
-                        "add": {
-                            "index": i,
-                            "alias": alias,
-                            "is_write_index": write_index == i,
-                        }
-                    }
-                    for i, _ in indices
-                ]
-
-            update_aliases(context=context, actions=actions)
-            return success(context=context, stage=tg_stage)
-
-        verified = verify.expand(context=fetch.expand(context=upstream))
-        report(upstream=verified, stage=tg_stage)
-        return fix.expand(context=verified)
-
-    @task_group
-    def rollover_alias(upstream: List[Context]) -> List[Context]:
-        tg_stage = "rollover_alias"
-
-        @task
-        def fetch(context: Context) -> Context:
-            if not context["success"]:
-                return context
-            tenant = context["tenant"]
-            return success(
-                context=context,
-                stage=tg_stage,
-                value={
-                    "read_alias": [
-                        i
-                        for i, _, _ in fetch_indices_in_alias(
-                            alias=tenant, conn_id=context["conn_id"]
-                        )
-                    ],
-                    "rollover_alias": {
-                        i: b
-                        for i, _, b in fetch_indices_in_alias(
-                            alias=f"{tenant}-rollover", conn_id=context["conn_id"]
-                        )
-                    },
-                },
-            )
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            indices = context["value"]
-            indices_in_read_alias = indices["read_alias"]
-            indices_in_rollover_alias = indices["rollover_alias"]
-
-            needs_fixing = []
-            for index in indices_in_read_alias:
-                if index not in indices_in_rollover_alias:
-                    needs_fixing.append(index)
-                    continue
-                details = extract_index_details(index)
-
-                if indices_in_rollover_alias[index] and details["should_rollover"]:
-                    return success(context=context, stage=tg_stage)
-
-                if indices_in_rollover_alias[index] or details["should_rollover"]:
-                    needs_fixing.append(index)
-
-            return failure(context=context, stage=tg_stage, error=needs_fixing)
-
-        @task
-        @chain_on_error_in_stage(stage=tg_stage)
-        def fix(context: Context) -> Context:
-
-            alias = f"{context['tenant']}-rollover"
-            actions = [
-                {
-                    "add": {
-                        "index": index,
-                        "alias": alias,
-                        "is_write_index": extract_index_details(index)[
-                            "should_rollover"
-                        ],
-                    }
-                }
-                for index in context["error"]
-            ]
-
-            update_aliases(context=context, actions=actions)
-            return success(context=context, stage=tg_stage)
-
-        verified = verify.expand(context=fetch.expand(context=upstream))
-        report(upstream=verified, stage=tg_stage)
-        return fix.expand(context=verified)
+        trigger_child = TriggerDagRunOperator.partial(
+            task_id="trigger_fix_aliases_dag",
+            trigger_dag_id="fix_aliases_dag",  # The DAG ID to trigger
+            wait_for_completion=True,  # Wait for the child DAG to finish
+            poke_interval=15,
+        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
+        t = wait_for_completion(upstream=verified)
+        trigger_child >> t
+        return t
 
     @task
     def print_errors(upstream: List[Context]) -> None:
-        for c in upstream:
+
+        errors = [x for x in upstream if not x["success"]]
+        print(
+            f"""
+        success: {len(upstream) - len(errors)}/{len(upstream)}
+        errors: {len(errors)}/{len(upstream)}
+        """
+        )
+
+        for i, c in enumerate(upstream):
             if not c["success"]:
-                print(f'{c["tenant"]} - {c["stage"]}:')
-                pprint.pprint(c, indent=2)
+                print(
+                    f"""
+                {c["tenant"]} - {c["stage"]}:
+                {pprint.pformat(c["error"], indent=2)}
+                """
+                )
 
     initial_context = Context(
-        conn_id="{{ params.db_conn }}", dry_run="{{ params.dry_run }}"
+        conn_id="{{ params.conn_id }}",
+        dry_run="{{ params.dry_run }}",
     )
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)
-    te = expired_indices(upstream=t3)
-    t5 = read_alias(upstream=t4)
-    t6 = write_alias(upstream=t5)
-    t7 = rollover_alias(upstream=t6)
-    print_errors(upstream=t7)
+    aliases(upstream=t4)
+    # print_errors(upstream=t7)
 
 
-fix_and_verify_dag()
+verify_dag()

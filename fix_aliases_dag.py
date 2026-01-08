@@ -7,13 +7,9 @@ from airflow.models import Param
 
 from repo.fix_and_verify import (
     INDEX_REGEX,
-    Context,
-    success,
-    failure,
-    chain_on_error_in_stage,
     index_has_expired, extract_index_details,
 )
-from repo.utils import http_hook_post, http_hook_get
+from repo.utils import http_hook_post, http_hook_get, chain_on_error_in_stage, Context, success, failure
 
 
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:
