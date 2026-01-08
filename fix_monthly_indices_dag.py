@@ -31,7 +31,7 @@ def create_index(index, payload, conn_id):
     description="This DAG replaces fix and verify job.",
     catchup=False,
     params={
-        "db_conn": Param("es-testing", type="string"),
+        "conn_id": Param("es-testing", type="string"),
         "dry_run": Param(True, type="boolean"),
         "tenant": Param(
             "spftesting_topic-builder-spf.medallia.com-spftesting", type="string"
@@ -103,7 +103,7 @@ def fix_monthly_indices_dag():
         tenant="{{ params.tenant }}",
         tenant_id="{{ params.tenant_id }}",
         retention="{{ params.retention }}",
-        conn_id="{{ params.db_conn }}",
+        conn_id="{{ params.conn_id }}",
         dry_run="{{ params.dry_run }}",
     )
 

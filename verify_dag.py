@@ -40,7 +40,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     max_active_runs=1,
     catchup=False,
     params={
-        "db_conn": Param("es-testing", type="string"),
+        "conn_id": Param("es-testing", type="string"),
         "dry_run": Param(True, type="boolean"),
     },
     render_template_as_native_obj=True,
@@ -432,7 +432,7 @@ def verify_dag():
                 )
 
     initial_context = Context(
-        conn_id="{{ params.db_conn }}",
+        conn_id="{{ params.conn_id }}",
         dry_run="{{ params.dry_run }}",
     )
     t1 = fetch_indices_per_tenant(context=initial_context)
