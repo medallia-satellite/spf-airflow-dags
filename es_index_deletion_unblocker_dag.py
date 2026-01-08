@@ -147,6 +147,7 @@ def es_index_deletion_unblocker_dag():
 
 
     @task
+    @chain_on_success
     def verify(context: Context) -> Context:
         indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
         expired = []
