@@ -180,6 +180,6 @@ def es_index_deletion_unblocker_dag():
     )
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
-    te = fix(context=verify(upstream=t2))
+    te = fix.expand(context=verify.expand(context=t2))
 
 es_index_deletion_unblocker_dag()
