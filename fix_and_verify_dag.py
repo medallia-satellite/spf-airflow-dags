@@ -15,7 +15,17 @@ from repo.fix_and_verify import (
     extract_index_details,
     generate_past_month_starts,
 )
-from repo.utils import xcom_pull, xcom_push, http_hook_get, chain_on_success, Context, success, failure
+from repo.utils import (
+    xcom_pull,
+    xcom_push,
+    http_hook_get,
+    chain_on_success,
+    Context,
+    success,
+    failure,
+    wait_for_completion,
+    select_eligible_for_fix,
+)
 
 
 def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
@@ -41,47 +51,6 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     render_template_as_native_obj=True,
 )
 def verify_dag():
-    @task(trigger_rule="none_failed")
-    def wait_for_completion(upstream: List[Context]) -> List[Context]:
-        return upstream
-
-    @task
-    def select_eligible_for_fix(upstream: List[Context], stage: str) -> List[Context]:
-        eligible_for_fix = []
-        for i, c in enumerate(upstream):
-            if not c["success"] and c["stage"] == stage:
-                print(f"{i}: {c['tenant']}")
-                pprint.pprint(c["error"], indent=2)
-                eligible_for_fix.append(c)
-        total = len(upstream)
-        errors = sum(1 for c in upstream if not c["success"])
-        print(
-            f"""
-
-            Summary
-                total success: {total - errors}/{total}
-                total errors: {errors}/{total}
-                    errors in stage '{stage}': {len(eligible_for_fix)}/{errors}
-            """
-        )
-        return eligible_for_fix
-
-    @task
-    def report(upstream: List[Context], stage: str) -> List[Context]:
-        errors = [x for x in upstream if not x["success"]]
-        print(
-            f"""
-        success: {len(upstream) - len(errors)}/{len(upstream)}
-        errors: {len(errors)}/{len(upstream)}
-        errors in stage {stage}: {len([e for e in errors if e["stage"] == stage])}/{len(errors)}
-        """
-        )
-        for i, c in enumerate(upstream):
-            if not c["success"] and c["stage"] == stage:
-                print(f"{i}: {c['tenant']}")
-                pprint.pprint(c)
-        return errors
-
     @task
     def fetch_indices_per_tenant(context: Context) -> List[Context]:
         fetched = http_hook_get(context["conn_id"], "/_cat/indices?h=index&format=json")
@@ -235,15 +204,17 @@ def verify_dag():
         trigger_child >> t
         return t
 
-
     @task_group
     def aliases(upstream: Context) -> List[Context]:
         stage = "aliases"
+
         @task
         @chain_on_success
         def fetch(context: Context) -> Context:
             tenant = context["tenant"]
-            indices = fetch_indices(prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"])
+            indices = fetch_indices(
+                prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"]
+            )
             alias_per_index = {i: [] for i in indices}
             results = http_hook_get(context["conn_id"], f"/_cat/aliases/{tenant}*")
             for r in results:

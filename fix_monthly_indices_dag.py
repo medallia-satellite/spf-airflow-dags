@@ -9,7 +9,14 @@ from repo.fix_and_verify import (
     extract_index_details,
     generate_past_month_starts,
 )
-from repo.utils import http_hook_put, http_hook_get, chain_on_error_in_stage, Context, success, failure
+from repo.utils import (
+    http_hook_put,
+    http_hook_get,
+    chain_on_error_in_stage,
+    Context,
+    success,
+    failure,
+)
 
 
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:

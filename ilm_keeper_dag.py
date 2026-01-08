@@ -1,5 +1,4 @@
 import json
-import pprint
 from collections import defaultdict
 from typing import List
 
@@ -13,22 +12,33 @@ from repo.fix_and_verify import (
     extract_index_details,
     index_has_expired,
 )
-from repo.utils import xcom_pull, xcom_push, http_hook_get, http_hook_put, chain_on_success, chain_on_error_in_stage, \
-    Context, success, failure
+from repo.utils import (
+    xcom_pull,
+    xcom_push,
+    http_hook_get,
+    http_hook_put,
+    chain_on_success,
+    chain_on_error_in_stage,
+    Context,
+    success,
+    failure,
+    select_eligible_for_fix,
+)
 
 
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     results = http_hook_get(conn_id, f"/_cat/indices/{prefix}*?h=index&format=json")
     return [r["index"] for r in results]
 
+
 def update_index_settings(conn_id: str, index, payload):
     return http_hook_put(conn_id, f"{index}/_settings", json.dumps(payload))
 
 
 @dag(
-    dag_display_name="es_index_deletion_unblocker_dag",
+    dag_display_name="ILM Keeper",
     tags=["spf", "elasticsearch"],
-    description="AAAA",
+    description="This DAG replaces ILM keeper",
     max_active_runs=1,
     catchup=False,
     params={
@@ -37,23 +47,7 @@ def update_index_settings(conn_id: str, index, payload):
     },
     render_template_as_native_obj=True,
 )
-def es_index_deletion_unblocker_dag():
-    @task
-    def report(upstream: List[Context], stage: str) -> List[Context]:
-        errors = [x for x in upstream if not x["success"]]
-        print(
-            f"""
-        success: {len(upstream) - len(errors)}/{len(upstream)}
-        errors: {len(errors)}/{len(upstream)}
-        errors in stage {stage}: {len([e for e in errors if e["stage"] == stage])}/{len(errors)}
-        """
-        )
-        for i, c in enumerate(upstream):
-            if not c["success"] and c["stage"] == stage:
-                print(f"{i}: {c['tenant']}")
-                pprint.pprint(c)
-        return errors
-
+def ilm_keeper_dag():
     @task
     def fetch_indices_per_tenant(context: Context) -> List[Context]:
         fetched = http_hook_get(context["conn_id"], "/_cat/indices?h=index&format=json")
@@ -139,9 +133,8 @@ def es_index_deletion_unblocker_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch(upstream))
-        report(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=tg_stage)
         return verified
-
 
     @task
     @chain_on_success
@@ -157,7 +150,7 @@ def es_index_deletion_unblocker_dag():
 
     @task
     @chain_on_error_in_stage(stage="verify")
-    def fix(context: Context) -> Context:
+    def mark_indexing_complete(context: Context) -> Context:
         # Marking indexing as completed unblocks ILMs retention lifecycle when rollovers are performed manually.
         for index in context["error"]:
             print(
@@ -172,33 +165,14 @@ def es_index_deletion_unblocker_dag():
                 print(f"Response:\n{json.dumps(response, indent=2)}")
         return success(context=context, stage="verify")
 
-    @task
-    def print_errors(upstream: List[Context]) -> None:
-
-        errors = [x for x in upstream if not x["success"]]
-        print(
-            f"""
-        success: {len(upstream) - len(errors)}/{len(upstream)}
-        errors: {len(errors)}/{len(upstream)}
-        """
-        )
-
-        for i, c in enumerate(upstream):
-            if not c["success"]:
-                print(
-                    f"""
-                {c["tenant"]} - {c["stage"]}:
-                {pprint.pformat(c["error"], indent=2)}
-                """
-                )
-
     initial_context = Context(
         conn_id="{{ params.conn_id }}",
         dry_run="{{ params.dry_run }}",
     )
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
-    te = fix.expand(context=verify.expand(context=t2))
-    report(upstream=te, stage="verify")
-    print_errors(upstream=te)
-es_index_deletion_unblocker_dag()
+    t3 = verify.expand(context=t2)
+    te = mark_indexing_complete.expand(context=select_eligible_for_fix(upstream=t3))
+
+
+ilm_keeper_dag()

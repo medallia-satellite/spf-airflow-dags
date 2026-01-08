@@ -1,6 +1,7 @@
 import functools
-from typing import Any, TypedDict, Optional
+from typing import Any, TypedDict, Optional, List
 
+from airflow.decorators import task
 from airflow.operators.python import get_current_context
 from airflow.providers.http.hooks.http import HttpHook
 
@@ -117,3 +118,29 @@ def failure(
         }
     )
     return context
+
+
+@task(trigger_rule="none_failed")
+def wait_for_completion(upstream: List[Context]) -> List[Context]:
+    return upstream
+
+
+@task
+def select_eligible_for_fix(upstream: List[Context], stage: str) -> List[Context]:
+    eligible_for_fix = []
+    for i, c in enumerate(upstream):
+        if not c["success"] and c["stage"] == stage:
+            print(f"{i}: {c['tenant']}")
+            eligible_for_fix.append(c)
+    total = len(upstream)
+    errors = sum(1 for c in upstream if not c["success"])
+    print(
+        f"""
+
+        Summary
+            total success: {total - errors}/{total}
+            total errors: {errors}/{total}
+                errors in stage '{stage}': {len(eligible_for_fix)}/{errors}
+        """
+    )
+    return eligible_for_fix

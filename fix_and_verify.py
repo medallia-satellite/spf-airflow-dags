@@ -104,9 +104,11 @@ def extract_index_details(index):
         ),
     }
 
+
 def index_has_expired(index, retention):
     m = INDEX_REGEX.fullmatch(index).groupdict()
     return is_past_retention_limit(m["month"], retention)
+
 
 def is_past_retention_limit(iso_date_str: str, retention_months: int) -> bool:
     current_month_start = datetime.datetime.now(datetime.timezone.utc).replace(
@@ -119,10 +121,9 @@ def is_past_retention_limit(iso_date_str: str, retention_months: int) -> bool:
     )
     return comparison_date < retention_cutoff
 
+
 def generate_past_month_starts(n):
     current_month_start = datetime.datetime.today().replace(
         day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc
     ) - relativedelta(months=n - 1)
     return [current_month_start + relativedelta(months=i) for i in range(n + 1)]
-
-
