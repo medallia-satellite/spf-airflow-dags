@@ -1,12 +1,12 @@
 import json
 import pprint
 from collections import defaultdict
-from typing import List, Tuple
+from typing import List
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
 
-from fix_and_verify import (
+from repo.fix_and_verify import (
     BASE_REGEX,
     INDEX_REGEX,
     POLICY_MAPPING,
@@ -17,7 +17,7 @@ from fix_and_verify import (
     failure,
     success, chain_on_error_in_stage,
 )
-from utils import xcom_pull, xcom_push, http_hook_get, http_hook_put
+from repo.utils import xcom_pull, xcom_push, http_hook_get, http_hook_put
 
 
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:
