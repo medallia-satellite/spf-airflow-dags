@@ -1,3 +1,10 @@
+import os
+import sys
+
+dag_dir = os.path.dirname(os.path.abspath(__file__))
+module_path = os.path.join(dag_dir, "repo")
+sys.path.append(module_path)
+
 from collections import defaultdict
 from typing import List, Tuple
 
@@ -5,7 +12,7 @@ from airflow.decorators import dag, task_group, task
 from airflow.models import Param
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
-from repo.fix_and_verify import (
+from fix_and_verify import (
     BASE_REGEX,
     INDEX_REGEX,
     ALIAS_REGEX_MAPPING,
@@ -14,7 +21,7 @@ from repo.fix_and_verify import (
     extract_index_details,
     generate_past_month_starts,
 )
-from repo.utils import (
+from utils import (
     xcom_pull,
     xcom_push,
     http_hook_get,
