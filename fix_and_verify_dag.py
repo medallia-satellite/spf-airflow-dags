@@ -1,4 +1,3 @@
-import pprint
 from collections import defaultdict
 from typing import List, Tuple
 
@@ -54,7 +53,6 @@ def verify_dag():
     @task
     def fetch_indices_per_tenant(context: Context) -> List[Context]:
         fetched = http_hook_get(context["conn_id"], "/_cat/indices?h=index&format=json")
-        print(fetched)
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -240,25 +238,6 @@ def verify_dag():
         trigger_child >> t
         return t
 
-    @task
-    def print_errors(upstream: List[Context]) -> None:
-
-        errors = [x for x in upstream if not x["success"]]
-        print(
-            f"""
-        success: {len(upstream) - len(errors)}/{len(upstream)}
-        errors: {len(errors)}/{len(upstream)}
-        """
-        )
-
-        for i, c in enumerate(upstream):
-            if not c["success"]:
-                print(
-                    f"""
-                {c["tenant"]} - {c["stage"]}:
-                {pprint.pformat(c["error"], indent=2)}
-                """
-                )
 
     initial_context = Context(
         conn_id="{{ params.conn_id }}",
@@ -268,8 +247,7 @@ def verify_dag():
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)
-    aliases(upstream=t4)
-    # print_errors(upstream=t7)
+    t5 = aliases(upstream=t4)
 
 
 verify_dag()

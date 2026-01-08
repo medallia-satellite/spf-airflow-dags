@@ -51,7 +51,6 @@ def ilm_keeper_dag():
     @task
     def fetch_indices_per_tenant(context: Context) -> List[Context]:
         fetched = http_hook_get(context["conn_id"], "/_cat/indices?h=index&format=json")
-        print(fetched)
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -136,34 +135,42 @@ def ilm_keeper_dag():
         select_eligible_for_fix(upstream=verified, stage=tg_stage)
         return verified
 
-    @task
-    @chain_on_success
-    def verify(context: Context) -> Context:
-        indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-        expired = []
-        for index in indices:
-            if index_has_expired(index, context["retention"]):
-                expired.append(index)
-        if expired:
-            return failure(context=context, stage="verify", error=expired)
-        return success(context=context, stage="verify")
+    @task_group
+    def expired_indices(upstream: List[Context]) -> List[Context]:
+        stage = "expired_indices"
 
-    @task
-    @chain_on_error_in_stage(stage="verify")
-    def mark_indexing_complete(context: Context) -> Context:
-        # Marking indexing as completed unblocks ILMs retention lifecycle when rollovers are performed manually.
-        for index in context["error"]:
-            print(
-                f"Marking indexing as completed (dry-run={context['dry_run']}): {index}"
-            )
-            if not context["dry_run"]:
-                response = update_index_settings(
-                    context["conn_id"],
-                    index,
-                    {"index.lifecycle.indexing_complete": True},
+        @task
+        @chain_on_success
+        def verify(context: Context) -> Context:
+            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
+            expired = []
+            for index in indices:
+                if index_has_expired(index, context["retention"]):
+                    expired.append(index)
+            if expired:
+                return failure(context=context, stage=stage, error=expired)
+            return success(context=context, stage=stage)
+
+        @task
+        @chain_on_error_in_stage(stage=stage)
+        def fix(context: Context) -> Context:
+            # Marking indexing as completed unblocks ILMs retention lifecycle when rollovers are performed manually.
+            for index in context["error"]:
+                print(
+                    f"Marking indexing as completed (dry-run={context['dry_run']}): {index}"
                 )
-                print(f"Response:\n{json.dumps(response, indent=2)}")
-        return success(context=context, stage="verify")
+                if not context["dry_run"]:
+                    response = update_index_settings(
+                        context["conn_id"],
+                        index,
+                        {"index.lifecycle.indexing_complete": True},
+                    )
+                    print(f"Response:\n{json.dumps(response, indent=2)}")
+            return success(context=context, stage=stage)
+
+        verified = verify.expand(context=upstream)
+        fix.expand(context=select_eligible_for_fix(upstream=verified, stage=stage))
+        return verified
 
     initial_context = Context(
         conn_id="{{ params.conn_id }}",
@@ -171,8 +178,7 @@ def ilm_keeper_dag():
     )
     t1 = fetch_indices_per_tenant(context=initial_context)
     t2 = ilm_settings(upstream=t1)
-    t3 = verify.expand(context=t2)
-    te = mark_indexing_complete.expand(context=select_eligible_for_fix(upstream=t3))
+    t3 = expired_indices(upstream=t2)
 
 
 ilm_keeper_dag()
