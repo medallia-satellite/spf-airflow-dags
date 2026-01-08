@@ -219,33 +219,6 @@ def verify_dag():
         trigger_child >> t
         return t
 
-    @task_group
-    def expired_indices(upstream: List[Context]) -> List[Context]:
-        tg_stage = "expired_indices"
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            expired = []
-            for index in indices:
-                if index_has_expired(index, context["retention"]):
-                    expired.append(index)
-            if expired:
-                return failure(context=context, stage=tg_stage, error=expired)
-            return success(context=context, stage=tg_stage)
-
-        verified = verify.expand(context=upstream)
-
-        trigger_child = TriggerDagRunOperator.partial(
-            task_id="trigger_fix_expired_indices_dag",
-            trigger_dag_id="fix_expired_indices_dag",  # The DAG ID to trigger
-            wait_for_completion=True,  # Wait for the child DAG to finish
-            poke_interval=15,
-        ).expand(conf=report(upstream=verified, stage=tg_stage))
-        t = wait_for_completion(upstream=verified)
-        trigger_child >> t
-        return t
 
     @task_group
     def aliases(upstream: Context) -> List[Context]:
@@ -278,139 +251,6 @@ def verify_dag():
         trigger_child >> t
         return t
 
-    @task_group
-    def read_alias(upstream: List[Context]) -> List[Context]:
-        tg_stage = "read_alias"
-
-        @task
-        @chain_on_success
-        def fetch(context: Context) -> Context:
-            tenant = context["tenant"]
-            return success(
-                context=context,
-                stage=tg_stage,
-                value={
-                    "read_indices": [
-                        i
-                        for i, _, _ in fetch_indices_in_alias(
-                            alias=tenant, conn_id=context["conn_id"]
-                        )
-                    ],
-                    "indices": fetch_indices(prefix=tenant, conn_id=context["conn_id"]),
-                },
-            )
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            indices = set(context["value"]["indices"])
-            read_indices = set(context["value"]["read_indices"])
-            if len(indices) != len(read_indices):
-                return failure(
-                    context=context, stage=tg_stage, error=list(indices - read_indices)
-                )
-            return success(context=context, stage=tg_stage)
-
-        verified = verify.expand(context=fetch.expand(context=upstream))
-        report(upstream=verified, stage=tg_stage)
-        return verified
-
-    @task_group
-    def write_alias(upstream: List[Context]) -> List[Context]:
-        tg_stage = "write_alias"
-
-        @task
-        @chain_on_success
-        def fetch(context: Context) -> Context:
-            results = http_hook_get(
-                conn_id=context["conn_id"], endpoint=f'/{context["tenant"]}/_alias'
-            )
-            active_aliases = defaultdict(list)
-            retention = context["retention"]
-
-            for index, r in results.items():
-                details = extract_index_details(index)
-                alias = details["write_alias"]
-                if index_has_expired(index=index, retention=retention):
-                    continue
-                is_write = r["aliases"].get(alias, {}).get("is_write_index")
-                active_aliases[alias].append((index, is_write))
-
-            return success(context=context, stage=tg_stage, value=active_aliases)
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            fetched = context["value"]
-            missing = {}
-            print(fetched)
-            for alias, indices in context["value"].items():
-                if any(i[1] is None for i in indices) or not any(
-                    i[1] is True for i in indices
-                ):
-                    missing[alias] = indices
-            if missing:
-                return failure(context=context, stage=tg_stage, error=missing)
-            return success(context=context, stage=tg_stage)
-
-        verified = verify.expand(context=fetch.expand(context=upstream))
-        report(upstream=verified, stage=tg_stage)
-        return verified
-
-    @task_group
-    def rollover_alias(upstream: List[Context]) -> List[Context]:
-        tg_stage = "rollover_alias"
-
-        @task
-        def fetch(context: Context) -> Context:
-            if not context["success"]:
-                return context
-            tenant = context["tenant"]
-            return success(
-                context=context,
-                stage=tg_stage,
-                value={
-                    "read_alias": [
-                        i
-                        for i, _, _ in fetch_indices_in_alias(
-                            alias=tenant, conn_id=context["conn_id"]
-                        )
-                    ],
-                    "rollover_alias": {
-                        i: b
-                        for i, _, b in fetch_indices_in_alias(
-                            alias=f"{tenant}-rollover", conn_id=context["conn_id"]
-                        )
-                    },
-                },
-            )
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            indices = context["value"]
-            indices_in_read_alias = indices["read_alias"]
-            indices_in_rollover_alias = indices["rollover_alias"]
-
-            needs_fixing = []
-            for index in indices_in_read_alias:
-                if index not in indices_in_rollover_alias:
-                    needs_fixing.append(index)
-                    continue
-                details = extract_index_details(index)
-
-                if indices_in_rollover_alias[index] and details["should_rollover"]:
-                    return success(context=context, stage=tg_stage)
-
-                if indices_in_rollover_alias[index] or details["should_rollover"]:
-                    needs_fixing.append(index)
-
-            return failure(context=context, stage=tg_stage, error=needs_fixing)
-
-        verified = verify.expand(context=fetch.expand(context=upstream))
-        report(upstream=verified, stage=tg_stage)
-        return verified
-
     @task
     def print_errors(upstream: List[Context]) -> None:
 
@@ -439,11 +279,7 @@ def verify_dag():
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)
-    te = expired_indices(upstream=t3)
     aliases(upstream=t4)
-    # t5 = read_alias(upstream=t4)
-    # t6 = write_alias(upstream=t5)
-    # t7 = rollover_alias(upstream=t6)
     # print_errors(upstream=t7)
 
 
