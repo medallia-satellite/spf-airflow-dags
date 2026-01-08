@@ -1,10 +1,3 @@
-import os
-import sys
-
-dag_dir = os.path.dirname(os.path.abspath(__file__))
-module_path = os.path.join(dag_dir, "repo")
-sys.path.append(module_path)
-
 import json
 from collections import defaultdict
 from typing import List
@@ -12,14 +5,14 @@ from typing import List
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
 
-from fix_and_verify import (
+from repo.fix_and_verify import (
     BASE_REGEX,
     INDEX_REGEX,
     POLICY_MAPPING,
     extract_index_details,
     index_has_expired,
 )
-from utils import (
+from repo.utils import (
     xcom_pull,
     xcom_push,
     http_hook_get,
