@@ -5,14 +5,14 @@ from typing import List
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
 
-from repo.fix_and_verify import (
+from fix_and_verify import (
     BASE_REGEX,
     INDEX_REGEX,
     POLICY_MAPPING,
     extract_index_details,
     index_has_expired,
 )
-from repo.utils import (
+from utils import (
     xcom_pull,
     xcom_push,
     http_hook_get,

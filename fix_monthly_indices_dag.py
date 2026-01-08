@@ -4,12 +4,12 @@ from typing import List
 from airflow.decorators import dag, task
 from airflow.models import Param
 
-from repo.fix_and_verify import (
+from fix_and_verify import (
     INDEX_REGEX,
     extract_index_details,
     generate_past_month_starts,
 )
-from repo.utils import (
+from utils import (
     http_hook_put,
     http_hook_get,
     chain_on_error_in_stage,
