@@ -8,12 +8,12 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from fix_and_verify import (
+from repo.fix_and_verify import (
     INDEX_REGEX,
     extract_index_details,
     generate_write_aliases,
 )
-from utils import (
+from repo.utils import (
     http_hook_put,
     http_hook_get,
     chain_on_error_in_stage,

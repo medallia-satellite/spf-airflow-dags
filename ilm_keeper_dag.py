@@ -10,14 +10,14 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 
-from .fix_and_verify import (
+from repo.fix_and_verify import (
     BASE_REGEX,
     INDEX_REGEX,
     POLICY_MAPPING,
     extract_index_details,
     index_has_expired,
 )
-from .utils import (
+from repo.utils import (
     xcom_pull,
     xcom_push,
     http_hook_get,
