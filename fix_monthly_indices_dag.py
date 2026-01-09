@@ -5,7 +5,8 @@ from typing import List
 from airflow.decorators import dag, task
 from airflow.models import Param
 import sys
-sys.path.insert(0,os.path.abspath(os.path.dirname(__file__)))
+
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from fix_and_verify import (
     INDEX_REGEX,
@@ -67,8 +68,11 @@ def fix_monthly_indices_dag():
     @task
     def verify(context: Context) -> Context:
         missing = []
-        for write_alias in generate_write_aliases(context["tenant"], context["retention"]):
-            if not any(index.startswith(f'seaas-{write_alias}-{context["tenant_id"]}')
+        for write_alias in generate_write_aliases(
+            context["tenant"], context["retention"]
+        ):
+            if not any(
+                index.startswith(f'seaas-{write_alias}-{context["tenant_id"]}')
                 for index in context["value"]
             ):
                 missing.append(write_alias)
@@ -87,7 +91,9 @@ def fix_monthly_indices_dag():
             index = f'seaas-{write_alias}-{context["tenant_id"]}-{suffix:06}'
             details = extract_index_details(index)
             payload = {
-                "settings": {"index.lifecycle.origination_date": details["origination_date"]},
+                "settings": {
+                    "index.lifecycle.origination_date": details["origination_date"]
+                },
                 "aliases": {
                     details["read_alias"]: {"is_write_index": False},
                     details["write_alias"]: {"is_write_index": True},

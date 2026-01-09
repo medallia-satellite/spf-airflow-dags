@@ -180,8 +180,12 @@ def verify_dag():
         @chain_on_success
         def verify(context: Context) -> Context:
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            for write_alias in generate_write_aliases(context["tenant"], context["retention"]):
-                if not any(index.startswith(f"seaas-{write_alias}") for index in indices):
+            for write_alias in generate_write_aliases(
+                context["tenant"], context["retention"]
+            ):
+                if not any(
+                    index.startswith(f"seaas-{write_alias}") for index in indices
+                ):
                     return failure(context=context, stage=tg_stage)
             return success(context=context, stage=tg_stage)
 
@@ -233,7 +237,6 @@ def verify_dag():
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
-
 
     initial_context = Context(
         conn_id="{{ params.conn_id }}",
