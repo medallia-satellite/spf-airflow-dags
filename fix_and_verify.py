@@ -90,11 +90,13 @@ def extract_index_details(index):
     tenant = BASE_REGEX.search(index).group(0)
     m = INDEX_REGEX.fullmatch(index).groupdict()
     month = m["month"]
+    origination_date = int(datetime.datetime.fromisoformat(month).replace(tzinfo=datetime.timezone.utc).timestamp() * 1e3)
     return {
         "tenant": tenant,
         "tenant_id": m["tenant_id"],
         "suffix": int(m["suffix"]),
         "month": month,
+        "origination_date": origination_date,
         "read_alias": tenant,
         "rollover_alias": f"{tenant}-rollover",
         "write_alias": ALIAS_REGEX_MAPPING["write"].search(index).group(0),
@@ -121,9 +123,8 @@ def is_past_retention_limit(iso_date_str: str, retention_months: int) -> bool:
     )
     return comparison_date < retention_cutoff
 
-
-def generate_past_month_starts(n):
+def generate_write_aliases(tenant, retention_months):
     current_month_start = datetime.datetime.today().replace(
         day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc
-    ) - relativedelta(months=n - 1)
-    return [current_month_start + relativedelta(months=i) for i in range(n + 1)]
+    ) - relativedelta(months=retention_months - 1)
+    return [f"{tenant}-{current_month_start + relativedelta(months=i):%Y-%m-%d}" for i in range(retention_months + 1)]

@@ -10,7 +10,7 @@ sys.path.insert(0,os.path.abspath(os.path.dirname(__file__)))
 from fix_and_verify import (
     INDEX_REGEX,
     extract_index_details,
-    generate_past_month_starts,
+    generate_write_aliases,
 )
 from utils import (
     http_hook_put,
@@ -67,14 +67,11 @@ def fix_monthly_indices_dag():
     @task
     def verify(context: Context) -> Context:
         missing = []
-        for month_start in generate_past_month_starts(context["retention"]):
-            if not any(
-                index.startswith(
-                    f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}'
-                )
+        for write_alias in generate_write_aliases(context["tenant"], context["retention"]):
+            if not any(index.startswith(f'seaas-{write_alias}-{context["tenant_id"]}')
                 for index in context["value"]
             ):
-                missing.append(month_start)
+                missing.append(write_alias)
 
         if missing:
             return failure(context=context, error=missing, stage="verify")
@@ -85,13 +82,12 @@ def fix_monthly_indices_dag():
     def fix(context: Context) -> None:
         suffix = context["latest_suffix"]
 
-        for month_start in context["error"]:
+        for write_alias in context["error"]:
             suffix += 1
-            origination_date = int(month_start.timestamp() * 1e3)
-            index = f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}-{context["tenant_id"]}-{suffix:06}'
+            index = f'seaas-{write_alias}-{context["tenant_id"]}-{suffix:06}'
             details = extract_index_details(index)
             payload = {
-                "settings": {"index.lifecycle.origination_date": origination_date},
+                "settings": {"index.lifecycle.origination_date": details["origination_date"]},
                 "aliases": {
                     details["read_alias"]: {"is_write_index": False},
                     details["write_alias"]: {"is_write_index": True},

@@ -12,7 +12,7 @@ from fix_and_verify import (
     POLICY_MAPPING,
     expected_index_template,
     extract_index_details,
-    generate_past_month_starts,
+    generate_write_aliases,
 )
 from utils import (
     xcom_pull,
@@ -180,13 +180,8 @@ def verify_dag():
         @chain_on_success
         def verify(context: Context) -> Context:
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            for month_start in generate_past_month_starts(context["retention"]):
-                if not any(
-                    index.startswith(
-                        f'seaas-{context["tenant"]}-{month_start:%Y-%m-%d}'
-                    )
-                    for index in indices
-                ):
+            for write_alias in generate_write_aliases(context["tenant"], context["retention"]):
+                if not any(index.startswith(f"seaas-{write_alias}") for index in indices):
                     return failure(context=context, stage=tg_stage)
             return success(context=context, stage=tg_stage)
 
@@ -222,6 +217,7 @@ def verify_dag():
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
+            # Each index should have read, write and rollover aliases
             if any(len(a) != 3 for a in context["value"].values()):
                 return failure(context=context, stage=stage)
             return success(context=context, stage=stage)
