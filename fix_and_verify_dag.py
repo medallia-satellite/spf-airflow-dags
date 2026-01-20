@@ -5,7 +5,7 @@ from airflow.decorators import dag, task_group, task
 from airflow.models import Param
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
-from fix_and_verify import (
+from .fix_and_verify import (
     BASE_REGEX,
     INDEX_REGEX,
     ALIAS_REGEX_MAPPING,
