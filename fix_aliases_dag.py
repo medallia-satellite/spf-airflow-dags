@@ -2,8 +2,7 @@ import json
 from collections import defaultdict
 from typing import List
 
-from airflow.decorators import dag, task, task_group
-from airflow.models import Param
+from airflow.sdk import dag, task, task_group, Param
 
 from repo.fix_and_verify import (
     INDEX_REGEX,
