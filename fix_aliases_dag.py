@@ -5,12 +5,12 @@ from typing import List
 from airflow.decorators import dag, task, task_group
 from airflow.models import Param
 
-from repo.fix_and_verify import (
+from fix_and_verify import (
     INDEX_REGEX,
     index_has_expired,
     extract_index_details,
 )
-from repo.utils import (
+from utils import (
     http_hook_post,
     http_hook_get,
     chain_on_error_in_stage,
