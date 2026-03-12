@@ -130,7 +130,7 @@ def select_eligible_for_fix(upstream: List[Context], stage: str) -> List[Context
     eligible_for_fix = []
     for i, c in enumerate(upstream):
         if not c["success"] and c["stage"] == stage:
-            print(f"{i}: {c['tenant']}")
+            print(f"{i}: {c['tenant']} - {c['error']}")
             eligible_for_fix.append(c)
     total = len(upstream)
     errors = sum(1 for c in upstream if not c["success"])
