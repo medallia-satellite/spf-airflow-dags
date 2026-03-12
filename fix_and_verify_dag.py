@@ -134,8 +134,8 @@ def verify_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch(upstream))
-
-        return select_eligible_for_fix(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=tg_stage)
+        return verified
 
     @task_group
     def index_templates(upstream: List[Context]) -> List[Context]:
@@ -169,8 +169,8 @@ def verify_dag():
             return success(context=context, stage=tg_stage)
 
         verified = verify.expand(context=fetch(upstream))
-
-        return select_eligible_for_fix(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=tg_stage)
+        return verified
 
     @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
