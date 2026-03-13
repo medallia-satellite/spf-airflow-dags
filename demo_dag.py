@@ -8,8 +8,7 @@ from airflow.models import Param
     max_active_runs=1,
     catchup=False,
     params={
-        "name": Param("stranger", type="string"),
-        "dry_run": Param(True, type="boolean"),
+        "name": Param("stranger", type="string")
     },
 )
 def demo_dag():
