@@ -20,7 +20,7 @@ def demo_dag():
     def say_bye(n: str):
         print(f"bye {n}")
 
-    name = "{{ params.conn_id }}"
+    name = "{{ params.name }}"
     say_hello(name) >> say_bye(name)
 
 demo_dag()
