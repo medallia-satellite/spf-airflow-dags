@@ -43,6 +43,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     max_active_runs=1,
+    schedule=None,
     catchup=False,
     params={
         "conn_id": Param("es-testing", type="string"),

@@ -45,6 +45,7 @@ def update_index_settings(conn_id: str, index, payload):
     tags=["spf", "elasticsearch"],
     description="This DAG replaces ILM keeper",
     max_active_runs=1,
+    schedule=None,
     catchup=False,
     params={
         "conn_id": Param("es-testing", type="string"),
