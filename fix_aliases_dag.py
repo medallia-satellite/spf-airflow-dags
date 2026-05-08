@@ -37,6 +37,7 @@ def update_aliases(context, actions):
     dag_display_name="Fix Aliases",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
+    schedule=None,
     catchup=False,
     params={
         "conn_id": Param("es-testing", type="string"),

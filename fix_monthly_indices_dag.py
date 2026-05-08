@@ -36,6 +36,7 @@ def create_index(index, payload, conn_id):
     dag_display_name="Fix Monthly Indices",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
+    schedule=None,
     catchup=False,
     params={
         "conn_id": Param("es-testing", type="string"),
