@@ -51,7 +51,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     },
     render_template_as_native_obj=True,
 )
-def verify_dag():
+def fix_and_verify_dag():
     @task
     def fetch_indices_per_tenant(context: Context) -> List[Context]:
         fetched = http_hook_get(context["conn_id"], "/_cat/indices?h=index&format=json")
@@ -251,4 +251,4 @@ def verify_dag():
     t5 = aliases(upstream=t4)
 
 
-verify_dag()
+fix_and_verify_dag()
