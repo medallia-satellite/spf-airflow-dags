@@ -27,6 +27,7 @@ from utils import (
 )
 
 
+
 def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
     results = http_hook_get(conn_id, f"/_cat/aliases/{alias}")
     return [(i["index"], i["alias"], i["is_write_index"] == "true") for i in results]
