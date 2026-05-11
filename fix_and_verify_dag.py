@@ -53,10 +53,9 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
 )
 def fix_and_verify_dag():
     @task
-    def fetch_indices_per_tenant() -> List[Context]:
-        conn_id = xcom_pull("runtime_config", "conn_id")
+    def fetch_indices_per_tenant(cfg: dict) -> List[Context]:
 
-        fetched = http_hook_get(conn_id, "/_cat/indices?h=index&format=json")
+        fetched = http_hook_get(cfg["conn_id"], "/_cat/indices?h=index&format=json")
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -81,14 +80,13 @@ def fix_and_verify_dag():
         return grouped
 
     @task_group
-    def ilm_settings(upstream: List[Context]) -> List[Context]:
+    def ilm_settings(upstream: List[Context], cfg: dict) -> List[Context]:
         stage = "ilm_settings"
-        conn_id = xcom_pull("runtime_config", "conn_id")
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
             results = http_hook_get(
-                conn_id,
+                cfg["conn_id"],
                 "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
             )
             for k, v in results.items():
@@ -141,13 +139,12 @@ def fix_and_verify_dag():
         return verified
 
     @task_group
-    def index_templates(upstream: List[Context]) -> List[Context]:
+    def index_templates(upstream: List[Context], cfg: dict) -> List[Context]:
         stage = "index_templates"
-        conn_id = xcom_pull("runtime_config", "conn_id")
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            results = http_hook_get(conn_id, "/_index_template/*-rollover")
+            results = http_hook_get(cfg["conn_id"], "/_index_template/*-rollover")
             for r in results["index_templates"]:
                 if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
                     xcom_push(r["name"], r["index_template"])
@@ -176,10 +173,8 @@ def fix_and_verify_dag():
         return verified
 
     @task_group
-    def monthly_indices(upstream: List[Context]) -> List[Context]:
+    def monthly_indices(upstream: List[Context], cfg: dict) -> List[Context]:
         stage = "monthly_indices"
-        conn_id = xcom_pull("runtime_config", "conn_id")
-        dry_run = xcom_pull("runtime_config", "dry_run")
 
         @task
         @chain_on_success
@@ -201,26 +196,24 @@ def fix_and_verify_dag():
             trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=15,
-        ).expand(conf={"conn_id": conn_id, "dry_run": dry_run, **select_eligible_for_fix(upstream=verified, stage=stage)})
+        ).expand(conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"], **select_eligible_for_fix(upstream=verified, stage=stage)})
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
 
     @task_group
-    def aliases(upstream: Context) -> List[Context]:
+    def aliases(upstream: Context, cfg: dict) -> List[Context]:
         stage = "aliases"
-        conn_id = xcom_pull("runtime_config", "conn_id")
-        dry_run = xcom_pull("runtime_config", "dry_run")
 
         @task
         @chain_on_success
         def fetch(context: Context) -> Context:
             tenant = context["tenant"]
             indices = fetch_indices(
-                prefix=f"seaas-{tenant}-*", conn_id=conn_id
+                prefix=f"seaas-{tenant}-*", conn_id=cfg["conn_id"]
             )
             alias_per_index = {i: [] for i in indices}
-            results = http_hook_get(conn_id, f"/_cat/aliases/{tenant}*")
+            results = http_hook_get(cfg["conn_id"], f"/_cat/aliases/{tenant}*")
             for r in results:
                 alias_per_index[r["index"]].append(r["alias"])
             return success(context=context, stage=stage, value=alias_per_index)
@@ -240,27 +233,18 @@ def fix_and_verify_dag():
             trigger_dag_id="fix_aliases_dag",  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=15,
-        ).expand(conf={"conn_id": conn_id, "dry_run": dry_run, **select_eligible_for_fix(upstream=verified, stage=stage)})
+        ).expand(conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"], **select_eligible_for_fix(upstream=verified, stage=stage)})
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
 
-    @task
-    def runtime_config(config) -> dict:
-        return {
-            "conn_id": config["conn_id"],
-            "dry_run": config["dry_run"],
-        }
+    config = {"conn_id": "{{ params.conn_id }}", "dry_run": "{{ params.dry_run }}"}
+    t1 = fetch_indices_per_tenant(cfg=config)
 
-    cfg = runtime_config({"conn_id": "{{ params.conn_id }}", "dry_run": "{{ params.dry_run }}"})
-
-    t1 = fetch_indices_per_tenant()
-    cfg >> t1
-
-    t2 = ilm_settings(upstream=t1)
-    t3 = index_templates(upstream=t2)
-    t4 = monthly_indices(upstream=t3)
-    t5 = aliases(upstream=t4)
+    t2 = ilm_settings(upstream=t1, cfg=config)
+    t3 = index_templates(upstream=t2, cfg=config)
+    t4 = monthly_indices(upstream=t3, cfg=config)
+    t5 = aliases(upstream=t4, cfg=config)
 
 
 fix_and_verify_dag()
