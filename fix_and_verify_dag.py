@@ -189,15 +189,32 @@ def fix_and_verify_dag():
                     return failure(context=context, stage=stage)
             return success(context=context, stage=stage)
 
-        verified = verify.expand(context=upstream)
+        @task
+        def trigger_fix_monthly(context: Context):
+            conf = {
+                "conn_id": cfg["conn_id"],
+                "dry_run": cfg["dry_run"],
+                **context
+            }
+            return TriggerDagRunOperator(
+                task_id=f"trigger_monthly_{context['tenant']}",
+                trigger_dag_id="fix_monthly_indices_dag",
+                wait_for_completion=True,
+                conf=conf,
+            )
 
-        trigger_child = TriggerDagRunOperator.partial(
-            task_id="trigger_fix_monthly_indices_dag",
-            trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
-            wait_for_completion=True,  # Wait for the child DAG to finish
-            poke_interval=15,
-            conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"]},
-        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
+
+        # trigger_child = TriggerDagRunOperator.partial(
+        #     task_id="trigger_fix_monthly_indices_dag",
+        #     trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
+        #     wait_for_completion=True,  # Wait for the child DAG to finish
+        #     poke_interval=15,
+        #     conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"]},
+        # ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
+
+        verified = verify.expand(context=upstream)
+        eligible = select_eligible_for_fix(upstream=verified, stage=stage)
+        trigger_child = trigger_fix_monthly.expand(context=eligible, cfg=cfg)
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
@@ -227,15 +244,33 @@ def fix_and_verify_dag():
                 return failure(context=context, stage=stage)
             return success(context=context, stage=stage)
 
+        @task
+        def trigger_fix_aliases(context: Context):
+            conf = {
+                "conn_id": cfg["conn_id"],
+                "dry_run": cfg["dry_run"],
+                **context
+            }
+            return TriggerDagRunOperator(
+                task_id=f"trigger_fix_aliases_{context['tenant']}",
+                trigger_dag_id="fix_aliases_dag",
+                wait_for_completion=True,
+                conf=conf,
+            )
+
+        #
+        # trigger_child = TriggerDagRunOperator.partial(
+        #     task_id="trigger_fix_aliases_dag",
+        #     trigger_dag_id="fix_aliases_dag",  # The DAG ID to trigger
+        #     wait_for_completion=True,  # Wait for the child DAG to finish
+        #     poke_interval=15,
+        #     conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"]},
+        # ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
+        #
         verified = verify.expand(context=fetch.expand(context=upstream))
 
-        trigger_child = TriggerDagRunOperator.partial(
-            task_id="trigger_fix_aliases_dag",
-            trigger_dag_id="fix_aliases_dag",  # The DAG ID to trigger
-            wait_for_completion=True,  # Wait for the child DAG to finish
-            poke_interval=15,
-            conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"]},
-        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
+        eligible = select_eligible_for_fix(upstream=verified, stage=stage)
+        trigger_child = trigger_fix_aliases.expand(context=eligible, cfg=cfg)
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
