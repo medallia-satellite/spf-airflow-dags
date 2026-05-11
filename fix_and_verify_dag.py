@@ -214,7 +214,7 @@ def fix_and_verify_dag():
 
         verified = verify.expand(context=upstream)
         eligible = select_eligible_for_fix(upstream=verified, stage=stage)
-        trigger_child = trigger_fix_monthly.expand(context=eligible, cfg=cfg)
+        trigger_child = trigger_fix_monthly.expand(context=eligible)
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
@@ -270,7 +270,7 @@ def fix_and_verify_dag():
         verified = verify.expand(context=fetch.expand(context=upstream))
 
         eligible = select_eligible_for_fix(upstream=verified, stage=stage)
-        trigger_child = trigger_fix_aliases.expand(context=eligible, cfg=cfg)
+        trigger_child = trigger_fix_aliases.expand(context=eligible)
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
