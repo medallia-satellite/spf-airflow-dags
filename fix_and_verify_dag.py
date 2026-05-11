@@ -244,10 +244,10 @@ def fix_and_verify_dag():
         return t
 
     @task
-    def runtime_config(params) -> dict:
+    def runtime_config(config) -> dict:
         return {
-            "conn_id": params["conn_id"],
-            "dry_run": params["dry_run"],
+            "conn_id": config["conn_id"],
+            "dry_run": config["dry_run"],
         }
 
     cfg = runtime_config({"conn_id": "{{ params.conn_id }}", "dry_run": "{{ params.dry_run }}"})
