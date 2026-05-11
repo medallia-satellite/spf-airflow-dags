@@ -196,7 +196,8 @@ def fix_and_verify_dag():
             trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=15,
-        ).expand(conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"], **select_eligible_for_fix(upstream=verified, stage=stage)})
+            conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"]},
+        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
