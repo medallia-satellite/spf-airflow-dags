@@ -54,9 +54,9 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
 )
 def fix_and_verify_dag():
     @task
-    def fetch_indices_per_tenant(cfg: dict) -> List[Context]:
+    def fetch_indices_per_tenant() -> List[Context]:
 
-        fetched = http_hook_get(cfg["conn_id"], "/_cat/indices?h=index&format=json")
+        fetched = http_hook_get(get_param("conn_id"), "/_cat/indices?h=index&format=json")
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -81,13 +81,13 @@ def fix_and_verify_dag():
         return grouped
 
     @task_group
-    def ilm_settings(upstream: List[Context], cfg: dict) -> List[Context]:
+    def ilm_settings(upstream: List[Context]) -> List[Context]:
         stage = "ilm_settings"
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
             results = http_hook_get(
-                cfg["conn_id"],
+                get_param("conn_id"),
                 "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
             )
             for k, v in results.items():
@@ -140,12 +140,12 @@ def fix_and_verify_dag():
         return verified
 
     @task_group
-    def index_templates(upstream: List[Context], cfg: dict) -> List[Context]:
+    def index_templates(upstream: List[Context]) -> List[Context]:
         stage = "index_templates"
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            results = http_hook_get(cfg["conn_id"], "/_index_template/*-rollover")
+            results = http_hook_get(get_param("conn_id"), "/_index_template/*-rollover")
             for r in results["index_templates"]:
                 if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
                     xcom_push(r["name"], r["index_template"])
@@ -174,7 +174,7 @@ def fix_and_verify_dag():
         return verified
 
     @task_group
-    def monthly_indices(upstream: List[Context], cfg: dict) -> List[Context]:
+    def monthly_indices(upstream: List[Context]) -> List[Context]:
         stage = "monthly_indices"
 
         @task
@@ -193,8 +193,8 @@ def fix_and_verify_dag():
         @task
         def trigger_fix_monthly(context: Context):
             conf = {
-                "conn_id": cfg["conn_id"],
-                "dry_run": cfg["dry_run"],
+                "conn_id": get_param("conn_id"),
+                "dry_run": get_param("dry_run"),
                 **context
             }
             return TriggerDagRunOperator(
@@ -221,7 +221,7 @@ def fix_and_verify_dag():
         return t
 
     @task_group
-    def aliases(upstream: Context, cfg: dict) -> List[Context]:
+    def aliases(upstream: Context) -> List[Context]:
         stage = "aliases"
 
         @task
@@ -229,10 +229,10 @@ def fix_and_verify_dag():
         def fetch(context: Context) -> Context:
             tenant = context["tenant"]
             indices = fetch_indices(
-                prefix=f"seaas-{tenant}-*", conn_id=cfg["conn_id"]
+                prefix=f"seaas-{tenant}-*", conn_id=get_param("conn_id")
             )
             alias_per_index = {i: [] for i in indices}
-            results = http_hook_get(cfg["conn_id"], f"/_cat/aliases/{tenant}*")
+            results = http_hook_get(get_param("conn_id"), f"/_cat/aliases/{tenant}*")
             for r in results:
                 alias_per_index[r["index"]].append(r["alias"])
             return success(context=context, stage=stage, value=alias_per_index)
@@ -248,8 +248,8 @@ def fix_and_verify_dag():
         @task
         def trigger_fix_aliases(context: Context):
             conf = {
-                "conn_id": cfg["conn_id"],
-                "dry_run": cfg["dry_run"],
+                "conn_id": get_param("conn_id"),
+                "dry_run": get_param("dry_run"),
                 **context
             }
             return TriggerDagRunOperator(
@@ -276,22 +276,16 @@ def fix_and_verify_dag():
         trigger_child >> t
         return t
 
-    @task
-    def runtime_config() -> dict:
+    def get_param(param: str) -> str:
         ctx = get_current_context()
-        params = ctx["params"]
-        return {
-            "conn_id": params["conn_id"],
-            "dry_run": params["dry_run"],
-        }
+        return  ctx["params"][param]
 
-    config = runtime_config()
 
-    t1 = fetch_indices_per_tenant(cfg=config)
-    t2 = ilm_settings(upstream=t1, cfg=config)
-    t3 = index_templates(upstream=t2, cfg=config)
-    t4 = monthly_indices(upstream=t3, cfg=config)
-    t5 = aliases(upstream=t4, cfg=config)
+    t1 = fetch_indices_per_tenant()
+    t2 = ilm_settings(upstream=t1)
+    t3 = index_templates(upstream=t2)
+    t4 = monthly_indices(upstream=t3)
+    t5 = aliases(upstream=t4)
 
 
 fix_and_verify_dag()
