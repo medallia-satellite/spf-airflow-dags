@@ -82,11 +82,11 @@ def fix_and_verify_dag():
 
     @task_group
     def ilm_settings(upstream: List[Context]) -> List[Context]:
-        tg_stage = "ilm_settings"
+        stage = "ilm_settings"
+        conn_id = xcom_pull("runtime_config", "conn_id")
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            conn_id = xcom_pull("runtime_config", "conn_id")
             results = http_hook_get(
                 conn_id,
                 "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
@@ -109,7 +109,7 @@ def fix_and_verify_dag():
             if len(indices) != len(il_list):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error="Some indices are missing ILM settings",
                 )
 
@@ -122,31 +122,31 @@ def fix_and_verify_dag():
             ):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error=f"Invalid policies: {set(policies)}",
                 )
 
             if not all(r == f"{context['tenant']}-rollover" for r in rollover):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error=f"Invalid rollover alias {rollover}",
                 )
 
             context.update({"retention": POLICY_MAPPING[policies[0]]})
-            return success(context=context, stage=tg_stage)
+            return success(context=context, stage=stage)
 
         verified = verify.expand(context=fetch(upstream))
-        select_eligible_for_fix(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=stage)
         return verified
 
     @task_group
     def index_templates(upstream: List[Context]) -> List[Context]:
-        tg_stage = "index_templates"
+        stage = "index_templates"
+        conn_id = xcom_pull("runtime_config", "conn_id")
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            conn_id = xcom_pull("runtime_config", "conn_id")
             results = http_hook_get(conn_id, "/_index_template/*-rollover")
             for r in results["index_templates"]:
                 if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
@@ -165,19 +165,21 @@ def fix_and_verify_dag():
             ):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error=f"Invalid index template: {index_template}",
                 )
 
-            return success(context=context, stage=tg_stage)
+            return success(context=context, stage=stage)
 
         verified = verify.expand(context=fetch(upstream))
-        select_eligible_for_fix(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=stage)
         return verified
 
     @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
-        tg_stage = "monthly_indices"
+        stage = "monthly_indices"
+        conn_id = xcom_pull("runtime_config", "conn_id")
+        dry_run = xcom_pull("runtime_config", "dry_run")
 
         @task
         @chain_on_success
@@ -189,8 +191,8 @@ def fix_and_verify_dag():
                 if not any(
                     index.startswith(f"seaas-{write_alias}") for index in indices
                 ):
-                    return failure(context=context, stage=tg_stage)
-            return success(context=context, stage=tg_stage)
+                    return failure(context=context, stage=stage)
+            return success(context=context, stage=stage)
 
         verified = verify.expand(context=upstream)
 
@@ -199,7 +201,7 @@ def fix_and_verify_dag():
             trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=15,
-        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=tg_stage))
+        ).expand(conf={"conn_id": conn_id, "dry_run": dry_run, **select_eligible_for_fix(upstream=verified, stage=stage)})
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
@@ -207,12 +209,12 @@ def fix_and_verify_dag():
     @task_group
     def aliases(upstream: Context) -> List[Context]:
         stage = "aliases"
+        conn_id = xcom_pull("runtime_config", "conn_id")
+        dry_run = xcom_pull("runtime_config", "dry_run")
 
         @task
         @chain_on_success
         def fetch(context: Context) -> Context:
-            conn_id = xcom_pull("runtime_config", "conn_id")
-
             tenant = context["tenant"]
             indices = fetch_indices(
                 prefix=f"seaas-{tenant}-*", conn_id=conn_id
@@ -238,7 +240,7 @@ def fix_and_verify_dag():
             trigger_dag_id="fix_aliases_dag",  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=15,
-        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
+        ).expand(conf={"conn_id": conn_id, "dry_run": dry_run, **select_eligible_for_fix(upstream=verified, stage=stage)})
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
