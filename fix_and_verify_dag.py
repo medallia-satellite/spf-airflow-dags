@@ -3,6 +3,7 @@ from typing import List, Tuple
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
+from airflow.operators.python import get_current_context
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from fix_and_verify import (
@@ -277,10 +278,13 @@ def fix_and_verify_dag():
 
     @task
     def runtime_config() -> dict:
+        ctx = get_current_context()
+        params = ctx["params"]
         return {
-            "conn_id": "{{ params.conn_id }}",
-            "dry_run": "{{ params.dry_run }}",
+            "conn_id": params["conn_id"],
+            "dry_run": params["dry_run"],
         }
+
     config = runtime_config()
 
     t1 = fetch_indices_per_tenant(cfg=config)
