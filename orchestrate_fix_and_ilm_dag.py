@@ -12,26 +12,26 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
     catchup=False,
     render_template_as_native_obj=True,
 )
-def orchestrate_fix_and_ilm():
+def orchestrate_fix_and_ilm_dag():
     targets = Variable.get(
         "orchestrate_dag_targets",
         deserialize_json=True,
     )
     for target, config in targets.items():
         f = TriggerDagRunOperator(
-            task_id=f"fix_{target}",
-            trigger_dag_id="fix_and_verify_dag",
+            task_id=f"repair_and_validate_indices__{target}",
+            trigger_dag_id="repair_and_validate_indices_dag",
             wait_for_completion=True,
             poke_interval=30,
             conf=config
         )
         i = TriggerDagRunOperator(
-            task_id=f"ilm_{target}",
-            trigger_dag_id="ilm_keeper_dag",  # The DAG ID to trigger
+            task_id=f"unblock_ilm_retention__{target}",
+            trigger_dag_id="unblock_ilm_retention_dag",  # The DAG ID to trigger
             wait_for_completion=True,  # Wait for the child DAG to finish
             poke_interval=30,
             conf=config
         )
         f >> i
 
-orchestrate_fix_and_ilm()
+orchestrate_fix_and_ilm_dag()

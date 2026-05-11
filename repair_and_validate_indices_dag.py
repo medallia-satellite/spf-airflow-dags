@@ -51,7 +51,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     },
     render_template_as_native_obj=True,
 )
-def fix_and_verify_dag():
+def repair_and_validate_indices_dag():
     @task
     def fetch_indices_per_tenant() -> List[Context]:
 
@@ -263,4 +263,4 @@ def fix_and_verify_dag():
     t5 = aliases(upstream=t4)
 
 
-fix_and_verify_dag()
+repair_and_validate_indices_dag()
