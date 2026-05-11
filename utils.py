@@ -89,8 +89,6 @@ class Context(TypedDict, total=False):
     value: Optional[Any]
     retention: Optional[int]
     latest_suffix: Optional[int]
-    conn_id: str
-    dry_run: bool
 
 
 def success(

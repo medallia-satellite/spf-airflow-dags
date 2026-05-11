@@ -41,9 +41,9 @@ def update_index_settings(conn_id: str, index, payload):
 
 
 @dag(
-    dag_display_name="Unblock ILM Retention",
+    dag_display_name="Finalize Expired Indices",
     tags=["spf", "elasticsearch"],
-    description="This DAG replaces ILM keeper",
+    description="This DAG marks expired indices as indexing complete to unblock ILM retention lifecycle. This is a one-time fix for expired indices that were not marked as indexing complete.",
     max_active_runs=1,
     schedule=None,
     catchup=False,
