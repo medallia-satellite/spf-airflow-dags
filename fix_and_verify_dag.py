@@ -275,9 +275,15 @@ def fix_and_verify_dag():
         trigger_child >> t
         return t
 
-    config = {"conn_id": "{{ params.conn_id }}", "dry_run": "{{ params.dry_run }}"}
-    t1 = fetch_indices_per_tenant(cfg=config)
+    @task
+    def runtime_config() -> dict:
+        return {
+            "conn_id": "{{ params.conn_id }}",
+            "dry_run": "{{ params.dry_run }}",
+        }
+    config = runtime_config()
 
+    t1 = fetch_indices_per_tenant(cfg=config)
     t2 = ilm_settings(upstream=t1, cfg=config)
     t3 = index_templates(upstream=t2, cfg=config)
     t4 = monthly_indices(upstream=t3, cfg=config)
