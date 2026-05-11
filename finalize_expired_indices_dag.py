@@ -53,7 +53,7 @@ def update_index_settings(conn_id: str, index, payload):
     },
     render_template_as_native_obj=True,
 )
-def unblock_ilm_retention_dag():
+def finalize_expired_indices_dag():
     @task
     def fetch_indices_per_tenant() -> List[Context]:
         fetched = http_hook_get(param_value("conn_id"), "/_cat/indices?h=index&format=json")
@@ -181,4 +181,4 @@ def unblock_ilm_retention_dag():
     t3 = expired_indices(upstream=t2)
 
 
-ilm_keeper_dag()
+finalize_expired_indices_dag()

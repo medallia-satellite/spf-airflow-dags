@@ -33,7 +33,7 @@ def create_index(index, payload, conn_id):
 
 
 @dag(
-    dag_display_name="Fix Monthly Indices",
+    dag_display_name="Reconcile Monthly Indices",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     schedule=None,
@@ -49,7 +49,7 @@ def create_index(index, payload, conn_id):
     },
     render_template_as_native_obj=True,
 )
-def fix_monthly_indices_dag():
+def reconcile_monthly_indices_dag():
     @task
     def fetch(context: Context) -> Context:
         tenant: str = context["tenant"]
@@ -119,4 +119,4 @@ def fix_monthly_indices_dag():
     fix(verify(fetch(initial_context)))
 
 
-fix_monthly_indices_dag()
+reconcile_monthly_indices_dag()

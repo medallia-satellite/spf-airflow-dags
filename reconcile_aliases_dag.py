@@ -34,7 +34,7 @@ def update_aliases(context, actions):
 
 
 @dag(
-    dag_display_name="Fix Aliases",
+    dag_display_name="Reconcile Aliases",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     schedule=None,
@@ -50,7 +50,7 @@ def update_aliases(context, actions):
     },
     render_template_as_native_obj=True,
 )
-def fix_aliases_dag():
+def reconcile_aliases_dag():
 
     @task_group
     def read_alias(upstream: Context) -> Context:
@@ -257,7 +257,7 @@ def fix_aliases_dag():
 
     initial_context = Context(
         tenant="{{ params.tenant }}",
-        tenant_id="{{ params.tenant_id }}",
+        tenant_id="{{ params.tenant_ivd }}",
         retention="{{ params.retention }}",
         conn_id="{{ params.conn_id }}",
         dry_run="{{ params.dry_run }}",
@@ -265,4 +265,4 @@ def fix_aliases_dag():
     rollover_alias(upstream=write_alias(upstream=read_alias(upstream=initial_context)))
 
 
-fix_aliases_dag()
+reconcile_aliases_dag()

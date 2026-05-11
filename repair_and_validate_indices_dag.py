@@ -39,7 +39,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
 
 
 @dag(
-    dag_display_name="Fix & Verify",
+    dag_display_name="Reconcile Wordtags Indices",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     max_active_runs=1,
@@ -51,7 +51,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     },
     render_template_as_native_obj=True,
 )
-def repair_and_validate_indices_dag():
+def reconcile_wordtags_indices_dag():
     @task
     def fetch_indices_per_tenant() -> List[Context]:
 
@@ -197,8 +197,8 @@ def repair_and_validate_indices_dag():
                 **context
             }
             return TriggerDagRunOperator(
-                task_id=f"trigger_monthly_{context['tenant']}",
-                trigger_dag_id="fix_monthly_indices_dag",
+                task_id=f"reconcile_monthly_indices__{context['tenant']}",
+                trigger_dag_id="reconcile_monthly_indices_dag",
                 wait_for_completion=True,
                 conf=conf,
             )
@@ -243,8 +243,8 @@ def repair_and_validate_indices_dag():
                 **context
             }
             return TriggerDagRunOperator(
-                task_id=f"trigger_fix_aliases_{context['tenant']}",
-                trigger_dag_id="fix_aliases_dag",
+                task_id=f"reconcile_aliases_dag__{context['tenant']}",
+                trigger_dag_id="reconcile_aliases_dag",
                 wait_for_completion=True,
                 conf=conf,
             )
@@ -263,4 +263,4 @@ def repair_and_validate_indices_dag():
     t5 = aliases(upstream=t4)
 
 
-repair_and_validate_indices_dag()
+reconcile_wordtags_indices_dag()

@@ -18,20 +18,20 @@ def orchestrate_fix_and_ilm_dag():
         deserialize_json=True,
     )
     for target, config in targets.items():
-        f = TriggerDagRunOperator(
+        t1 = TriggerDagRunOperator(
             task_id=f"repair_and_validate_indices__{target}",
             trigger_dag_id="repair_and_validate_indices_dag",
             wait_for_completion=True,
             poke_interval=30,
             conf=config
         )
-        i = TriggerDagRunOperator(
-            task_id=f"unblock_ilm_retention__{target}",
-            trigger_dag_id="unblock_ilm_retention_dag",  # The DAG ID to trigger
-            wait_for_completion=True,  # Wait for the child DAG to finish
+        t2 = TriggerDagRunOperator(
+            task_id=f"finalize_expired_indices__{target}",
+            trigger_dag_id="finalize_expired_indices_dag",
+            wait_for_completion=True,
             poke_interval=30,
             conf=config
         )
-        f >> i
+        t1 >> t2
 
 orchestrate_fix_and_ilm_dag()
