@@ -164,7 +164,7 @@ def fix_and_verify_dag():
                 return failure(
                     context=context,
                     stage=stage,
-                    error=f"Invalid index template: {index_template}",
+                    error=f"Invalid index template: {comparable}",
                 )
 
             return success(context=context, stage=stage)

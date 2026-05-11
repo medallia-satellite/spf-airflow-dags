@@ -41,29 +41,31 @@ INDEX_TEMPLATE_SETTINGS_INDEX_ANALYSIS = {
                         },
                     }
 INDEX_TEMPLATE_MAPPINGS = {
-    "comments": {
-        "type": "nested",
-        "properties": {
-            "language": {"type": "keyword"},
-            "linguisticConnections": {
-                "type": "text",
-                "analyzer": "topic-builder-analyzer",
-                "position_increment_gap": 1000,
+    "properties": {
+        "comments": {
+            "type": "nested",
+            "properties": {
+                "language": {"type": "keyword"},
+                "linguisticConnections": {
+                    "type": "text",
+                    "analyzer": "topic-builder-analyzer",
+                    "position_increment_gap": 1000,
+                },
+                "linguisticConnectionsIndexes": {"type": "short"},
+                "name": {"type": "keyword"},
+                "persona": {"type": "keyword"},
+                "sentenceContent": {
+                    "type": "text",
+                    "analyzer": "topic-builder-analyzer",
+                },
+                "sentenceIndex": {"type": "short"},
+                "wordEndIndexes": {"type": "integer"},
+                "wordStartIndexes": {"type": "integer"},
             },
-            "linguisticConnectionsIndexes": {"type": "short"},
-            "name": {"type": "keyword"},
-            "persona": {"type": "keyword"},
-            "sentenceContent": {
-                "type": "text",
-                "analyzer": "topic-builder-analyzer",
-            },
-            "sentenceIndex": {"type": "short"},
-            "wordEndIndexes": {"type": "integer"},
-            "wordStartIndexes": {"type": "integer"},
         },
+        "responseDate": {"type": "date"},
+        "surveyId": {"type": "long"},
     },
-    "responseDate": {"type": "date"},
-    "surveyId": {"type": "long"},
 }
 
 def expected_index_template(tenant, retention_months):
