@@ -4,15 +4,15 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 
 @dag(
-    dag_display_name="A cool DAG name",
+    dag_display_name="Orchestrate Maintenance DAG",
     tags=["spf", "elasticsearch"],
-    description="This nice DAG triggers other dags",
+    description="This DAG uses 'orchestrate_dag_targets' as targets to trigger maintenance workflows.",
     max_active_runs=1,
     schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
 )
-def orchestrate_fix_and_ilm_dag():
+def orchestrate_maintenance_dag():
     targets = Variable.get(
         "orchestrate_dag_targets",
         deserialize_json=True,
@@ -34,4 +34,4 @@ def orchestrate_fix_and_ilm_dag():
         )
         t1 >> t2
 
-orchestrate_fix_and_ilm_dag()
+orchestrate_maintenance_dag()
