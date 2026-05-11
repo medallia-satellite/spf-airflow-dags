@@ -190,6 +190,15 @@ def reconcile_wordtags_indices_dag():
             return success(context=context, stage=stage)
 
         @task
+        def build_config(context: Context) -> dict:
+            return {
+                "conn_id": param_value("conn_id"),
+                "dry_run": param_value("dry_run"),
+                **context
+            }
+
+
+        @task
         def trigger_fix_monthly(context: Context):
             conf = {
                 "conn_id": param_value("conn_id"),
@@ -205,9 +214,20 @@ def reconcile_wordtags_indices_dag():
 
         verified = verify.expand(context=upstream)
         eligible = select_eligible_for_fix(upstream=verified, stage=stage)
-        trigger_child = trigger_fix_monthly.expand(context=eligible)
+        # trigger_child = trigger_fix_monthly.expand(context=eligible)
+        config = build_config.expand(context=eligible)
+        trigger = (
+            TriggerDagRunOperator.partial(
+                task_id=f"reconcile_monthly_indices",
+                trigger_dag_id="reconcile_monthly_indices_dag",
+                wait_for_completion=True,
+                map_index_template="{{ task.parameters['conf']['tenant'] }}",
+            )
+            .expand(conf=config)
+        )
+
         t = wait_for_completion(upstream=verified)
-        trigger_child >> t
+        trigger >> t
         return t
 
     @task_group
@@ -236,6 +256,14 @@ def reconcile_wordtags_indices_dag():
             return success(context=context, stage=stage)
 
         @task
+        def build_config(context: Context) -> dict:
+            return {
+                "conn_id": param_value("conn_id"),
+                "dry_run": param_value("dry_run"),
+                **context
+            }
+
+        @task
         def trigger_fix_aliases(context: Context):
             conf = {
                 "conn_id": param_value("conn_id"),
@@ -251,9 +279,19 @@ def reconcile_wordtags_indices_dag():
         verified = verify.expand(context=fetch.expand(context=upstream))
 
         eligible = select_eligible_for_fix(upstream=verified, stage=stage)
-        trigger_child = trigger_fix_aliases.expand(context=eligible)
+        config = build_config.expand(context=eligible)
+        trigger = (
+            TriggerDagRunOperator.partial(
+                task_id=f"reconcile_aliases",
+                trigger_dag_id="reconcile_aliases_dag",
+                wait_for_completion=True,
+                map_index_template="{{ task.parameters['conf']['tenant'] }}",
+            )
+            .expand(conf=config)
+        )
+        # trigger = trigger_fix_aliases.expand(context=eligible)
         t = wait_for_completion(upstream=verified)
-        trigger_child >> t
+        trigger >> t
         return t
 
     t1 = fetch_indices_per_tenant()
