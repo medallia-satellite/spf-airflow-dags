@@ -3,6 +3,7 @@ from typing import List, Tuple
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
+from airflow.operators.python import get_current_context
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from fix_and_verify import (
@@ -53,9 +54,9 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
 )
 def reconcile_wordtags_indices_dag():
     @task
-    def fetch_indices_per_tenant() -> List[Context]:
+    def fetch_indices_per_tenant(config: dict) -> List[Context]:
 
-        fetched = http_hook_get(param_value("conn_id"), "/_cat/indices?h=index&format=json")
+        fetched = http_hook_get(config["conn_id"], "/_cat/indices?h=index&format=json")
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -80,13 +81,13 @@ def reconcile_wordtags_indices_dag():
         return grouped
 
     @task_group
-    def ilm_settings(upstream: List[Context]) -> List[Context]:
+    def ilm_settings(upstream: List[Context], config: dict) -> List[Context]:
         stage = "ilm_settings"
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
             results = http_hook_get(
-                param_value("conn_id"),
+                config["conn_id"],
                 "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
             )
             for k, v in results.items():
@@ -139,12 +140,12 @@ def reconcile_wordtags_indices_dag():
         return verified
 
     @task_group
-    def index_templates(upstream: List[Context]) -> List[Context]:
+    def index_templates(upstream: List[Context], config: dict) -> List[Context]:
         stage = "index_templates"
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            results = http_hook_get(param_value("conn_id"), "/_index_template/*-rollover")
+            results = http_hook_get(config["conn_id"], "/_index_template/*-rollover")
             for r in results["index_templates"]:
                 if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
                     xcom_push(r["name"], r["index_template"])
@@ -173,7 +174,7 @@ def reconcile_wordtags_indices_dag():
         return verified
 
     @task_group
-    def monthly_indices(upstream: List[Context]) -> List[Context]:
+    def monthly_indices(upstream: List[Context], config: dict) -> List[Context]:
         stage = "monthly_indices"
 
         @task
@@ -192,25 +193,10 @@ def reconcile_wordtags_indices_dag():
         @task
         def build_config(context: Context) -> dict:
             return {
-                "conn_id": param_value("conn_id"),
-                "dry_run": param_value("dry_run"),
+                "conn_id": config["conn_id"],
+                "dry_run": config["dry_run"],
                 **context
             }
-
-
-        @task
-        def trigger_fix_monthly(context: Context):
-            conf = {
-                "conn_id": param_value("conn_id"),
-                "dry_run": param_value("dry_run"),
-                **context
-            }
-            return TriggerDagRunOperator(
-                task_id=f"reconcile_monthly_indices__{context['tenant']}",
-                trigger_dag_id="reconcile_monthly_indices_dag",
-                wait_for_completion=True,
-                conf=conf,
-            )
 
         verified = verify.expand(context=upstream)
         eligible = select_eligible_for_fix(upstream=verified, stage=stage)
@@ -231,7 +217,7 @@ def reconcile_wordtags_indices_dag():
         return t
 
     @task_group
-    def aliases(upstream: Context) -> List[Context]:
+    def aliases(upstream: Context, config: dict) -> List[Context]:
         stage = "aliases"
 
         @task
@@ -239,10 +225,10 @@ def reconcile_wordtags_indices_dag():
         def fetch(context: Context) -> Context:
             tenant = context["tenant"]
             indices = fetch_indices(
-                prefix=f"seaas-{tenant}-*", conn_id=param_value("conn_id")
+                prefix=f"seaas-{tenant}-*", conn_id=config["conn_id"]
             )
             alias_per_index = {i: [] for i in indices}
-            results = http_hook_get(param_value("conn_id"), f"/_cat/aliases/{tenant}*")
+            results = http_hook_get(config["conn_id"], f"/_cat/aliases/{tenant}*")
             for r in results:
                 alias_per_index[r["index"]].append(r["alias"])
             return success(context=context, stage=stage, value=alias_per_index)
@@ -258,26 +244,12 @@ def reconcile_wordtags_indices_dag():
         @task
         def build_config(context: Context) -> dict:
             return {
-                "conn_id": param_value("conn_id"),
-                "dry_run": param_value("dry_run"),
+                "conn_id": config["conn_id"],
+                "dry_run": config["dry_run"],
                 **context
             }
 
-        @task
-        def trigger_fix_aliases(context: Context):
-            conf = {
-                "conn_id": param_value("conn_id"),
-                "dry_run": param_value("dry_run"),
-                **context
-            }
-            return TriggerDagRunOperator(
-                task_id=f"reconcile_aliases_dag__{context['tenant']}",
-                trigger_dag_id="reconcile_aliases_dag",
-                wait_for_completion=True,
-                conf=conf,
-            )
         verified = verify.expand(context=fetch.expand(context=upstream))
-
         eligible = select_eligible_for_fix(upstream=verified, stage=stage)
         config = build_config.expand(context=eligible)
         trigger = (
@@ -285,20 +257,27 @@ def reconcile_wordtags_indices_dag():
                 task_id=f"reconcile_aliases",
                 trigger_dag_id="reconcile_aliases_dag",
                 wait_for_completion=True,
-                map_index_template="{{ task.parameters['conf']['tenant'] }}",
             )
             .expand(conf=config)
         )
-        # trigger = trigger_fix_aliases.expand(context=eligible)
         t = wait_for_completion(upstream=verified)
         trigger >> t
         return t
 
-    t1 = fetch_indices_per_tenant()
-    t2 = ilm_settings(upstream=t1)
-    t3 = index_templates(upstream=t2)
-    t4 = monthly_indices(upstream=t3)
-    t5 = aliases(upstream=t4)
+    @task
+    def runtime_config():
+        ctx = get_current_context()
+
+        return {
+            "conn_id": ctx["params"]["conn_id"],
+            "dry_run": ctx["params"]["dry_run"]
+        }
+    cfg = runtime_config()
+    t1 = fetch_indices_per_tenant(config=cfg)
+    t2 = ilm_settings(upstream=t1, config=cfg)
+    t3 = index_templates(upstream=t2, config=cfg)
+    t4 = monthly_indices(upstream=t3, config=cfg)
+    t5 = aliases(upstream=t4, config=cfg)
 
 
 reconcile_wordtags_indices_dag()
