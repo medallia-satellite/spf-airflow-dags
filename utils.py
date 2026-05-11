@@ -6,6 +6,11 @@ from airflow.operators.python import get_current_context
 from airflow.providers.http.hooks.http import HttpHook
 
 
+def param_value(param: str) -> str:
+    ctx = get_current_context()
+    return  ctx["params"][param]
+
+
 def xcom_pull(task_id: str, key: str) -> Any:
     context = get_current_context()
     ti = context["ti"]

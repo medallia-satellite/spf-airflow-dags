@@ -3,7 +3,6 @@ from typing import List, Tuple
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
-from airflow.operators.python import get_current_context
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from fix_and_verify import (
@@ -24,7 +23,7 @@ from utils import (
     success,
     failure,
     wait_for_completion,
-    select_eligible_for_fix,
+    select_eligible_for_fix, param_value,
 )
 
 
@@ -56,7 +55,7 @@ def fix_and_verify_dag():
     @task
     def fetch_indices_per_tenant() -> List[Context]:
 
-        fetched = http_hook_get(get_param("conn_id"), "/_cat/indices?h=index&format=json")
+        fetched = http_hook_get(param_value("conn_id"), "/_cat/indices?h=index&format=json")
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -87,7 +86,7 @@ def fix_and_verify_dag():
         @task
         def fetch(data: List[Context]) -> List[Context]:
             results = http_hook_get(
-                get_param("conn_id"),
+                param_value("conn_id"),
                 "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
             )
             for k, v in results.items():
@@ -145,7 +144,7 @@ def fix_and_verify_dag():
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            results = http_hook_get(get_param("conn_id"), "/_index_template/*-rollover")
+            results = http_hook_get(param_value("conn_id"), "/_index_template/*-rollover")
             for r in results["index_templates"]:
                 if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
                     xcom_push(r["name"], r["index_template"])
@@ -193,8 +192,8 @@ def fix_and_verify_dag():
         @task
         def trigger_fix_monthly(context: Context):
             conf = {
-                "conn_id": get_param("conn_id"),
-                "dry_run": get_param("dry_run"),
+                "conn_id": param_value("conn_id"),
+                "dry_run": param_value("dry_run"),
                 **context
             }
             return TriggerDagRunOperator(
@@ -203,15 +202,6 @@ def fix_and_verify_dag():
                 wait_for_completion=True,
                 conf=conf,
             )
-
-
-        # trigger_child = TriggerDagRunOperator.partial(
-        #     task_id="trigger_fix_monthly_indices_dag",
-        #     trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
-        #     wait_for_completion=True,  # Wait for the child DAG to finish
-        #     poke_interval=15,
-        #     conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"]},
-        # ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
 
         verified = verify.expand(context=upstream)
         eligible = select_eligible_for_fix(upstream=verified, stage=stage)
@@ -229,10 +219,10 @@ def fix_and_verify_dag():
         def fetch(context: Context) -> Context:
             tenant = context["tenant"]
             indices = fetch_indices(
-                prefix=f"seaas-{tenant}-*", conn_id=get_param("conn_id")
+                prefix=f"seaas-{tenant}-*", conn_id=param_value("conn_id")
             )
             alias_per_index = {i: [] for i in indices}
-            results = http_hook_get(get_param("conn_id"), f"/_cat/aliases/{tenant}*")
+            results = http_hook_get(param_value("conn_id"), f"/_cat/aliases/{tenant}*")
             for r in results:
                 alias_per_index[r["index"]].append(r["alias"])
             return success(context=context, stage=stage, value=alias_per_index)
@@ -248,8 +238,8 @@ def fix_and_verify_dag():
         @task
         def trigger_fix_aliases(context: Context):
             conf = {
-                "conn_id": get_param("conn_id"),
-                "dry_run": get_param("dry_run"),
+                "conn_id": param_value("conn_id"),
+                "dry_run": param_value("dry_run"),
                 **context
             }
             return TriggerDagRunOperator(
@@ -258,16 +248,6 @@ def fix_and_verify_dag():
                 wait_for_completion=True,
                 conf=conf,
             )
-
-        #
-        # trigger_child = TriggerDagRunOperator.partial(
-        #     task_id="trigger_fix_aliases_dag",
-        #     trigger_dag_id="fix_aliases_dag",  # The DAG ID to trigger
-        #     wait_for_completion=True,  # Wait for the child DAG to finish
-        #     poke_interval=15,
-        #     conf={"conn_id": cfg["conn_id"], "dry_run": cfg["dry_run"]},
-        # ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
-        #
         verified = verify.expand(context=fetch.expand(context=upstream))
 
         eligible = select_eligible_for_fix(upstream=verified, stage=stage)
@@ -275,11 +255,6 @@ def fix_and_verify_dag():
         t = wait_for_completion(upstream=verified)
         trigger_child >> t
         return t
-
-    def get_param(param: str) -> str:
-        ctx = get_current_context()
-        return  ctx["params"][param]
-
 
     t1 = fetch_indices_per_tenant()
     t2 = ilm_settings(upstream=t1)
