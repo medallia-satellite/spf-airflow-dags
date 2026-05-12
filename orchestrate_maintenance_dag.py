@@ -20,7 +20,7 @@ def orchestrate_maintenance_dag():
     for target, config in targets.items():
         t1 = TriggerDagRunOperator(
             task_id=f"reconcile_wordtags_indices__{target}",
-            trigger_dag_id="repair_and_validate_indices_dag",
+            trigger_dag_id="reconcile_wordtags_indices_dag",
             wait_for_completion=True,
             poke_interval=30,
             conf=config
