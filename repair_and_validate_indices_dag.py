@@ -200,14 +200,12 @@ def reconcile_wordtags_indices_dag():
 
         verified = verify.expand(context=upstream)
         eligible = select_eligible_for_fix(upstream=verified, stage=stage)
-        # trigger_child = trigger_fix_monthly.expand(context=eligible)
         config = build_config.expand(context=eligible)
         trigger = (
             TriggerDagRunOperator.partial(
                 task_id=f"reconcile_monthly_indices",
                 trigger_dag_id="reconcile_monthly_indices_dag",
                 wait_for_completion=True,
-                map_index_template="{{ task.parameters['conf']['tenant'] }}",
             )
             .expand(conf=config)
         )
@@ -272,6 +270,7 @@ def reconcile_wordtags_indices_dag():
             "conn_id": ctx["params"]["conn_id"],
             "dry_run": ctx["params"]["dry_run"]
         }
+
     cfg = runtime_config()
     t1 = fetch_indices_per_tenant(config=cfg)
     t2 = ilm_settings(upstream=t1, config=cfg)
