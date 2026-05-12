@@ -1,14 +1,9 @@
 import json
-import os
 from collections import defaultdict
 from typing import List
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-
 
 from fix_and_verify import (
     BASE_REGEX,

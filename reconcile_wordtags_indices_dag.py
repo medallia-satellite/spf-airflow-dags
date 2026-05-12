@@ -3,7 +3,6 @@ from typing import List, Tuple
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
-from airflow.operators.python import get_current_context
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from fix_and_verify import (
@@ -24,9 +23,8 @@ from utils import (
     success,
     failure,
     wait_for_completion,
-    select_eligible_for_fix,
+    select_eligible_for_fix, param_value,
 )
-
 
 
 def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
@@ -55,7 +53,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
 def reconcile_wordtags_indices_dag():
     @task
     def fetch_indices_per_tenant() -> List[Context]:
-        conn_id = xcom_pull("runtime_config", "conn_id")
+        conn_id = param_value("conn_id")
 
         fetched = http_hook_get(conn_id, "/_cat/indices?h=index&format=json")
         results = defaultdict(list)
@@ -87,7 +85,7 @@ def reconcile_wordtags_indices_dag():
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            conn_id = xcom_pull("runtime_config", "conn_id")
+            conn_id = param_value("conn_id")
 
             results = http_hook_get(
                 conn_id,
@@ -148,7 +146,7 @@ def reconcile_wordtags_indices_dag():
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            conn_id = xcom_pull("runtime_config", "conn_id")
+            conn_id = param_value("conn_id")
 
             results = http_hook_get(conn_id, "/_index_template/*-rollover")
             for r in results["index_templates"]:
@@ -197,8 +195,8 @@ def reconcile_wordtags_indices_dag():
 
         @task
         def build_config(context: Context) -> dict:
-            conn_id = xcom_pull("runtime_config", "conn_id")
-            dry_run = xcom_pull("runtime_config", "dry_run")
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
 
             return {
                 "conn_id": conn_id,
@@ -229,7 +227,7 @@ def reconcile_wordtags_indices_dag():
         @task
         @chain_on_success
         def fetch(context: Context) -> Context:
-            conn_id = xcom_pull("runtime_config", "conn_id")
+            conn_id = param_value("conn_id")
 
             tenant = context["tenant"]
             indices = fetch_indices(
@@ -251,8 +249,8 @@ def reconcile_wordtags_indices_dag():
 
         @task
         def build_config(context: Context) -> dict:
-            conn_id = xcom_pull("runtime_config", "conn_id")
-            dry_run = xcom_pull("runtime_config", "dry_run")
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
 
             return {
                 "conn_id": conn_id,
@@ -275,22 +273,7 @@ def reconcile_wordtags_indices_dag():
         trigger >> t
         return t
 
-    @task
-    def runtime_config():
-        ctx = get_current_context()
-        conn_id = ctx["params"]["conn_id"]
-        dry_run = ctx["params"]["dry_run"]
-        xcom_push("conn_id", conn_id)
-        xcom_push("dry_run", dry_run)
-
-        return {
-            "conn_id": conn_id,
-            "dry_run": dry_run
-        }
-
-    cfg = runtime_config()
     t1 = fetch_indices_per_tenant()
-    cfg >> t1
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)

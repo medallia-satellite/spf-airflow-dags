@@ -4,7 +4,6 @@ from typing import List
 
 from airflow.decorators import dag, task, task_group
 from airflow.models import Param
-from airflow.operators.python import get_current_context
 
 from fix_and_verify import (
     INDEX_REGEX,
@@ -17,7 +16,7 @@ from utils import (
     chain_on_error_in_stage,
     Context,
     success,
-    failure, xcom_push, xcom_pull, param_value,
+    failure, param_value,
 )
 
 
@@ -271,19 +270,6 @@ def reconcile_aliases_dag():
             return success(context=context, stage=stage)
 
         return fix(context=verify(context=fetch(context=upstream)))
-    #
-    # @task
-    # def runtime_config():
-    #     ctx = get_current_context()
-    #     conn_id = ctx["params"]["conn_id"]
-    #     dry_run = ctx["params"]["dry_run"]
-    #     xcom_push("conn_id", conn_id)
-    #     xcom_push("dry_run", dry_run)
-    #
-    #     return {
-    #         "conn_id": conn_id,
-    #         "dry_run": dry_run
-    #     }
 
     initial_context = Context(
         tenant="{{ params.tenant }}",
@@ -291,10 +277,7 @@ def reconcile_aliases_dag():
         retention="{{ params.retention }}"
     )
 
-    # config = runtime_config()
-    r = read_alias(upstream=initial_context)
-    # config >> r
-    rollover_alias(upstream=(write_alias(upstream=r)))
+    rollover_alias(upstream=(write_alias(upstream=(read_alias(upstream=initial_context)))))
 
 
 reconcile_aliases_dag()

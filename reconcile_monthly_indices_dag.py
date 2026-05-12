@@ -1,14 +1,8 @@
 import json
-import os
 from typing import List
 
 from airflow.decorators import dag, task
 from airflow.models import Param
-import sys
-
-from airflow.operators.python import get_current_context
-
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from fix_and_verify import (
     INDEX_REGEX,
@@ -21,7 +15,7 @@ from utils import (
     chain_on_error_in_stage,
     Context,
     success,
-    failure, xcom_push, param_value,
+    failure, param_value,
 )
 
 
@@ -115,28 +109,12 @@ def reconcile_monthly_indices_dag():
                 response = create_index(index, payload, conn_id)
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
-    @task
-    def runtime_config():
-        ctx = get_current_context()
-        conn_id = ctx["params"]["conn_id"]
-        dry_run = ctx["params"]["dry_run"]
-        xcom_push("conn_id", conn_id)
-        xcom_push("dry_run", dry_run)
-
-        return {
-            "conn_id": conn_id,
-            "dry_run": dry_run
-        }
-
     initial_context = Context(
         tenant="{{ params.tenant }}",
         tenant_id="{{ params.tenant_id }}",
         retention="{{ params.retention }}",
     )
 
-    cfg = runtime_config()
-    f = fetch(initial_context)
-    cfg >> f
-    fix(verify(f))
+    fix(verify(fetch(initial_context)))
 
 reconcile_monthly_indices_dag()
