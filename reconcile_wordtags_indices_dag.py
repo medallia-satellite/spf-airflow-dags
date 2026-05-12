@@ -54,8 +54,10 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
 )
 def reconcile_wordtags_indices_dag():
     @task
-    def fetch_indices_per_tenant(config: dict) -> List[Context]:
-        fetched = http_hook_get(config["conn_id"], "/_cat/indices?h=index&format=json")
+    def fetch_indices_per_tenant() -> List[Context]:
+        conn_id = xcom_pull("runtime_config", "conn_id")
+
+        fetched = http_hook_get(conn_id, "/_cat/indices?h=index&format=json")
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -80,12 +82,12 @@ def reconcile_wordtags_indices_dag():
         return grouped
 
     @task_group
-    def ilm_settings(upstream: List[Context], config: dict) -> List[Context]:
+    def ilm_settings(upstream: List[Context]) -> List[Context]:
         stage = "ilm_settings"
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            conn_id = xcom_pull("runtime_config", "return_value")["conn_id"]
+            conn_id = xcom_pull("runtime_config", "conn_id")
 
             results = http_hook_get(
                 conn_id,
@@ -141,12 +143,14 @@ def reconcile_wordtags_indices_dag():
         return verified
 
     @task_group
-    def index_templates(upstream: List[Context], config: dict) -> List[Context]:
+    def index_templates(upstream: List[Context]) -> List[Context]:
         stage = "index_templates"
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            results = http_hook_get(config["conn_id"], "/_index_template/*-rollover")
+            conn_id = xcom_pull("runtime_config", "conn_id")
+
+            results = http_hook_get(conn_id, "/_index_template/*-rollover")
             for r in results["index_templates"]:
                 if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
                     xcom_push(r["name"], r["index_template"])
@@ -175,7 +179,7 @@ def reconcile_wordtags_indices_dag():
         return verified
 
     @task_group
-    def monthly_indices(upstream: List[Context], config: dict) -> List[Context]:
+    def monthly_indices(upstream: List[Context]) -> List[Context]:
         stage = "monthly_indices"
 
         @task
@@ -193,9 +197,12 @@ def reconcile_wordtags_indices_dag():
 
         @task
         def build_config(context: Context) -> dict:
+            conn_id = xcom_pull("runtime_config", "conn_id")
+            dry_run = xcom_pull("runtime_config", "dry_run")
+
             return {
-                "conn_id": config["conn_id"],
-                "dry_run": config["dry_run"],
+                "conn_id": conn_id,
+                "dry_run": dry_run,
                 **context
             }
 
@@ -216,18 +223,20 @@ def reconcile_wordtags_indices_dag():
         return t
 
     @task_group
-    def aliases(upstream: Context, config: dict) -> List[Context]:
+    def aliases(upstream: Context) -> List[Context]:
         stage = "aliases"
 
         @task
         @chain_on_success
         def fetch(context: Context) -> Context:
+            conn_id = xcom_pull("runtime_config", "conn_id")
+
             tenant = context["tenant"]
             indices = fetch_indices(
-                prefix=f"seaas-{tenant}-*", conn_id=config["conn_id"]
+                prefix=f"seaas-{tenant}-*", conn_id=conn_id
             )
             alias_per_index = {i: [] for i in indices}
-            results = http_hook_get(config["conn_id"], f"/_cat/aliases/{tenant}*")
+            results = http_hook_get(conn_id, f"/_cat/aliases/{tenant}*")
             for r in results:
                 alias_per_index[r["index"]].append(r["alias"])
             return success(context=context, stage=stage, value=alias_per_index)
@@ -242,9 +251,12 @@ def reconcile_wordtags_indices_dag():
 
         @task
         def build_config(context: Context) -> dict:
+            conn_id = xcom_pull("runtime_config", "conn_id")
+            dry_run = xcom_pull("runtime_config", "dry_run")
+
             return {
-                "conn_id": config["conn_id"],
-                "dry_run": config["dry_run"],
+                "conn_id": conn_id,
+                "dry_run": dry_run,
                 **context
             }
 
@@ -266,18 +278,23 @@ def reconcile_wordtags_indices_dag():
     @task
     def runtime_config():
         ctx = get_current_context()
+        conn_id = ctx["params"]["conn_id"]
+        dry_run = ctx["params"]["dry_run"]
+        xcom_push("conn_id", conn_id)
+        xcom_push("dry_run", dry_run)
 
         return {
-            "conn_id": ctx["params"]["conn_id"],
-            "dry_run": ctx["params"]["dry_run"]
+            "conn_id": conn_id,
+            "dry_run": dry_run
         }
 
     cfg = runtime_config()
-    t1 = fetch_indices_per_tenant(config=cfg)
-    t2 = ilm_settings(upstream=t1, config=cfg)
-    t3 = index_templates(upstream=t2, config=cfg)
-    t4 = monthly_indices(upstream=t3, config=cfg)
-    t5 = aliases(upstream=t4, config=cfg)
+    t1 = fetch_indices_per_tenant()
+    cfg >> t1
+    t2 = ilm_settings(upstream=t1)
+    t3 = index_templates(upstream=t2)
+    t4 = monthly_indices(upstream=t3)
+    t5 = aliases(upstream=t4)
 
 
 reconcile_wordtags_indices_dag()
