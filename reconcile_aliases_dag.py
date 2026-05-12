@@ -257,7 +257,7 @@ def reconcile_aliases_dag():
 
     initial_context = Context(
         tenant="{{ params.tenant }}",
-        tenant_id="{{ params.tenant_ivd }}",
+        tenant_id="{{ params.tenant_id }}",
         retention="{{ params.retention }}",
         conn_id="{{ params.conn_id }}",
         dry_run="{{ params.dry_run }}",
