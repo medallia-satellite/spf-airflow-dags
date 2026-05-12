@@ -1,14 +1,9 @@
 import json
-import os
 from collections import defaultdict
 from typing import List
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-
 
 from fix_and_verify import (
     BASE_REGEX,
@@ -27,7 +22,7 @@ from utils import (
     Context,
     success,
     failure,
-    select_eligible_for_fix,
+    select_eligible_for_fix, param_value,
 )
 
 
@@ -41,9 +36,9 @@ def update_index_settings(conn_id: str, index, payload):
 
 
 @dag(
-    dag_display_name="ILM Keeper",
+    dag_display_name="Finalize Expired Indices",
     tags=["spf", "elasticsearch"],
-    description="This DAG replaces ILM keeper",
+    description="This DAG marks expired indices as indexing complete to unblock ILM retention lifecycle. This is a one-time fix for expired indices that were not marked as indexing complete.",
     max_active_runs=1,
     schedule=None,
     catchup=False,
@@ -53,10 +48,10 @@ def update_index_settings(conn_id: str, index, payload):
     },
     render_template_as_native_obj=True,
 )
-def ilm_keeper_dag():
+def finalize_expired_indices_dag():
     @task
-    def fetch_indices_per_tenant(context: Context) -> List[Context]:
-        fetched = http_hook_get(context["conn_id"], "/_cat/indices?h=index&format=json")
+    def fetch_indices_per_tenant() -> List[Context]:
+        fetched = http_hook_get(param_value("conn_id"), "/_cat/indices?h=index&format=json")
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -76,20 +71,18 @@ def ilm_keeper_dag():
                     tenant=k[0],
                     tenant_id=k[1],
                     latest_suffix=latest_suffix,
-                    conn_id=context["conn_id"],
-                    dry_run=context["dry_run"],
                 )
             )
         return grouped
 
     @task_group
     def ilm_settings(upstream: List[Context]) -> List[Context]:
-        tg_stage = "ilm_settings"
+        stage = "ilm_settings"
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
             results = http_hook_get(
-                data[0]["conn_id"],
+                param_value("conn_id"),
                 "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
             )
             for k, v in results.items():
@@ -110,7 +103,7 @@ def ilm_keeper_dag():
             if len(indices) != len(il_list):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error="Some indices are missing ILM settings",
                 )
 
@@ -123,22 +116,22 @@ def ilm_keeper_dag():
             ):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error=f"Invalid policies: {set(policies)}",
                 )
 
             if not all(r == f"{context['tenant']}-rollover" for r in rollover):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error=f"Invalid rollover alias {rollover}",
                 )
 
             context.update({"retention": POLICY_MAPPING[policies[0]]})
-            return success(context=context, stage=tg_stage)
+            return success(context=context, stage=stage)
 
         verified = verify.expand(context=fetch(upstream))
-        select_eligible_for_fix(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=stage)
         return verified
 
     @task_group
@@ -163,11 +156,11 @@ def ilm_keeper_dag():
             # Marking indexing as completed unblocks ILMs retention lifecycle when rollovers are performed manually.
             for index in context["error"]:
                 print(
-                    f"Marking indexing as completed (dry-run={context['dry_run']}): {index}"
+                    f"Marking indexing as completed (dry-run={param_value('dry_run')}): {index}"
                 )
-                if not context["dry_run"]:
+                if not param_value("dry_run"):
                     response = update_index_settings(
-                        context["conn_id"],
+                        param_value("conn_id"),
                         index,
                         {"index.lifecycle.indexing_complete": True},
                     )
@@ -178,13 +171,9 @@ def ilm_keeper_dag():
         fix.expand(context=select_eligible_for_fix(upstream=verified, stage=stage))
         return verified
 
-    initial_context = Context(
-        conn_id="{{ params.conn_id }}",
-        dry_run="{{ params.dry_run }}",
-    )
-    t1 = fetch_indices_per_tenant(context=initial_context)
+    t1 = fetch_indices_per_tenant()
     t2 = ilm_settings(upstream=t1)
     t3 = expired_indices(upstream=t2)
 
 
-ilm_keeper_dag()
+finalize_expired_indices_dag()

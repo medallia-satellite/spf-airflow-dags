@@ -24,18 +24,7 @@ POLICY_MAPPING = {
     "M36_rollover": 36,
 }
 
-
-def expected_index_template(tenant, retention_months):
-    return {
-        "index_patterns": [f"seaas-{tenant}-*"],
-        "template": {
-            "settings": {
-                "index": {
-                    "lifecycle": {
-                        "name": f"M{retention_months}_rollover",
-                        "rollover_alias": f"{tenant}-rollover",
-                    },
-                    "analysis": {
+INDEX_TEMPLATE_SETTINGS_INDEX_ANALYSIS = {
                         "filter": {
                             "compound_capture": {
                                 "type": "pattern_capture",
@@ -50,38 +39,51 @@ def expected_index_template(tenant, retention_months):
                                 "tokenizer": "whitespace",
                             }
                         },
+                    }
+INDEX_TEMPLATE_MAPPINGS = {
+    "properties": {
+        "comments": {
+            "type": "nested",
+            "properties": {
+                "language": {"type": "keyword"},
+                "linguisticConnections": {
+                    "type": "text",
+                    "analyzer": "topic-builder-analyzer",
+                    "position_increment_gap": 1000,
+                },
+                "linguisticConnectionsIndexes": {"type": "short"},
+                "name": {"type": "keyword"},
+                "persona": {"type": "keyword"},
+                "sentenceContent": {
+                    "type": "text",
+                    "analyzer": "topic-builder-analyzer",
+                },
+                "sentenceIndex": {"type": "short"},
+                "wordEndIndexes": {"type": "integer"},
+                "wordStartIndexes": {"type": "integer"},
+            },
+        },
+        "responseDate": {"type": "date"},
+        "surveyId": {"type": "long"},
+    },
+}
+
+def expected_index_template(tenant, retention_months):
+    return {
+        "index_patterns": [f"seaas-{tenant}-*"],
+        "template": {
+            "settings": {
+                "index": {
+                    "lifecycle": {
+                        "name": f"M{retention_months}_rollover",
+                        "rollover_alias": f"{tenant}-rollover",
                     },
+                    "analysis": INDEX_TEMPLATE_SETTINGS_INDEX_ANALYSIS,
                     "number_of_shards": "1",
                     "number_of_replicas": "1",
                 }
             },
-            "mappings": {
-                "properties": {
-                    "comments": {
-                        "type": "nested",
-                        "properties": {
-                            "language": {"type": "keyword"},
-                            "linguisticConnections": {
-                                "type": "text",
-                                "analyzer": "topic-builder-analyzer",
-                                "position_increment_gap": 1000,
-                            },
-                            "linguisticConnectionsIndexes": {"type": "short"},
-                            "name": {"type": "keyword"},
-                            "persona": {"type": "keyword"},
-                            "sentenceContent": {
-                                "type": "text",
-                                "analyzer": "topic-builder-analyzer",
-                            },
-                            "sentenceIndex": {"type": "short"},
-                            "wordEndIndexes": {"type": "integer"},
-                            "wordStartIndexes": {"type": "integer"},
-                        },
-                    },
-                    "responseDate": {"type": "date"},
-                    "surveyId": {"type": "long"},
-                }
-            },
+            "mappings": INDEX_TEMPLATE_MAPPINGS,
         },
     }
 

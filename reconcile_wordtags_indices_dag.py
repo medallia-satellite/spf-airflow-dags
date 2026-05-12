@@ -23,9 +23,8 @@ from utils import (
     success,
     failure,
     wait_for_completion,
-    select_eligible_for_fix,
+    select_eligible_for_fix, param_value,
 )
-
 
 
 def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
@@ -39,7 +38,7 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
 
 
 @dag(
-    dag_display_name="Fix & Verify",
+    dag_display_name="Reconcile Wordtags Indices",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     max_active_runs=1,
@@ -51,10 +50,12 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     },
     render_template_as_native_obj=True,
 )
-def verify_dag():
+def reconcile_wordtags_indices_dag():
     @task
-    def fetch_indices_per_tenant(context: Context) -> List[Context]:
-        fetched = http_hook_get(context["conn_id"], "/_cat/indices?h=index&format=json")
+    def fetch_indices_per_tenant() -> List[Context]:
+        conn_id = param_value("conn_id")
+
+        fetched = http_hook_get(conn_id, "/_cat/indices?h=index&format=json")
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -73,21 +74,21 @@ def verify_dag():
                     success=True,
                     tenant=k[0],
                     tenant_id=k[1],
-                    latest_suffix=latest_suffix,
-                    conn_id=context["conn_id"],
-                    dry_run=context["dry_run"],
+                    latest_suffix=latest_suffix
                 )
             )
         return grouped
 
     @task_group
     def ilm_settings(upstream: List[Context]) -> List[Context]:
-        tg_stage = "ilm_settings"
+        stage = "ilm_settings"
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
+            conn_id = param_value("conn_id")
+
             results = http_hook_get(
-                data[0]["conn_id"],
+                conn_id,
                 "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
             )
             for k, v in results.items():
@@ -108,7 +109,7 @@ def verify_dag():
             if len(indices) != len(il_list):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error="Some indices are missing ILM settings",
                 )
 
@@ -121,31 +122,33 @@ def verify_dag():
             ):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error=f"Invalid policies: {set(policies)}",
                 )
 
             if not all(r == f"{context['tenant']}-rollover" for r in rollover):
                 return failure(
                     context=context,
-                    stage=tg_stage,
+                    stage=stage,
                     error=f"Invalid rollover alias {rollover}",
                 )
 
             context.update({"retention": POLICY_MAPPING[policies[0]]})
-            return success(context=context, stage=tg_stage)
+            return success(context=context, stage=stage)
 
         verified = verify.expand(context=fetch(upstream))
-        select_eligible_for_fix(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=stage)
         return verified
 
     @task_group
     def index_templates(upstream: List[Context]) -> List[Context]:
-        tg_stage = "index_templates"
+        stage = "index_templates"
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            results = http_hook_get(data[0]["conn_id"], "/_index_template/*-rollover")
+            conn_id = param_value("conn_id")
+
+            results = http_hook_get(conn_id, "/_index_template/*-rollover")
             for r in results["index_templates"]:
                 if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
                     xcom_push(r["name"], r["index_template"])
@@ -157,26 +160,25 @@ def verify_dag():
             index_template = xcom_pull(
                 "index_templates.fetch", f'{context["tenant"]}-rollover'
             )
-            _ = index_template.pop("composed_of")
-
-            if index_template != expected_index_template(
+            comparable = {k: v for k, v in index_template.items() if k != "composed_of"}
+            if comparable != expected_index_template(
                 tenant=context["tenant"], retention_months=context["retention"]
             ):
                 return failure(
                     context=context,
-                    stage=tg_stage,
-                    error=f"Invalid index template: {index_template}",
+                    stage=stage,
+                    error=f"Invalid index template: {comparable}",
                 )
 
-            return success(context=context, stage=tg_stage)
+            return success(context=context, stage=stage)
 
         verified = verify.expand(context=fetch(upstream))
-        select_eligible_for_fix(upstream=verified, stage=tg_stage)
+        select_eligible_for_fix(upstream=verified, stage=stage)
         return verified
 
     @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
-        tg_stage = "monthly_indices"
+        stage = "monthly_indices"
 
         @task
         @chain_on_success
@@ -188,19 +190,34 @@ def verify_dag():
                 if not any(
                     index.startswith(f"seaas-{write_alias}") for index in indices
                 ):
-                    return failure(context=context, stage=tg_stage)
-            return success(context=context, stage=tg_stage)
+                    return failure(context=context, stage=stage)
+            return success(context=context, stage=stage)
+
+        @task
+        def build_config(context: Context) -> dict:
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
+
+            return {
+                "conn_id": conn_id,
+                "dry_run": dry_run,
+                **context
+            }
 
         verified = verify.expand(context=upstream)
+        eligible = select_eligible_for_fix(upstream=verified, stage=stage)
+        config = build_config.expand(context=eligible)
+        trigger = (
+            TriggerDagRunOperator.partial(
+                task_id=f"reconcile_monthly_indices",
+                trigger_dag_id="reconcile_monthly_indices_dag",
+                wait_for_completion=True,
+            )
+            .expand(conf=config)
+        )
 
-        trigger_child = TriggerDagRunOperator.partial(
-            task_id="trigger_fix_monthly_indices_dag",
-            trigger_dag_id="fix_monthly_indices_dag",  # The DAG ID to trigger
-            wait_for_completion=True,  # Wait for the child DAG to finish
-            poke_interval=15,
-        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=tg_stage))
         t = wait_for_completion(upstream=verified)
-        trigger_child >> t
+        trigger >> t
         return t
 
     @task_group
@@ -210,12 +227,14 @@ def verify_dag():
         @task
         @chain_on_success
         def fetch(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+
             tenant = context["tenant"]
             indices = fetch_indices(
-                prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"]
+                prefix=f"seaas-{tenant}-*", conn_id=conn_id
             )
             alias_per_index = {i: [] for i in indices}
-            results = http_hook_get(context["conn_id"], f"/_cat/aliases/{tenant}*")
+            results = http_hook_get(conn_id, f"/_cat/aliases/{tenant}*")
             for r in results:
                 alias_per_index[r["index"]].append(r["alias"])
             return success(context=context, stage=stage, value=alias_per_index)
@@ -228,27 +247,37 @@ def verify_dag():
                 return failure(context=context, stage=stage)
             return success(context=context, stage=stage)
 
-        verified = verify.expand(context=fetch.expand(context=upstream))
+        @task
+        def build_config(context: Context) -> dict:
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
 
-        trigger_child = TriggerDagRunOperator.partial(
-            task_id="trigger_fix_aliases_dag",
-            trigger_dag_id="fix_aliases_dag",  # The DAG ID to trigger
-            wait_for_completion=True,  # Wait for the child DAG to finish
-            poke_interval=15,
-        ).expand(conf=select_eligible_for_fix(upstream=verified, stage=stage))
+            return {
+                "conn_id": conn_id,
+                "dry_run": dry_run,
+                **context
+            }
+
+        verified = verify.expand(context=fetch.expand(context=upstream))
+        eligible = select_eligible_for_fix(upstream=verified, stage=stage)
+        config = build_config.expand(context=eligible)
+        trigger = (
+            TriggerDagRunOperator.partial(
+                task_id=f"reconcile_aliases",
+                trigger_dag_id="reconcile_aliases_dag",
+                wait_for_completion=True,
+            )
+            .expand(conf=config)
+        )
         t = wait_for_completion(upstream=verified)
-        trigger_child >> t
+        trigger >> t
         return t
 
-    initial_context = Context(
-        conn_id="{{ params.conn_id }}",
-        dry_run="{{ params.dry_run }}",
-    )
-    t1 = fetch_indices_per_tenant(context=initial_context)
+    t1 = fetch_indices_per_tenant()
     t2 = ilm_settings(upstream=t1)
     t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)
     t5 = aliases(upstream=t4)
 
 
-verify_dag()
+reconcile_wordtags_indices_dag()

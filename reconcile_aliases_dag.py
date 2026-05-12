@@ -16,7 +16,7 @@ from utils import (
     chain_on_error_in_stage,
     Context,
     success,
-    failure,
+    failure, param_value,
 )
 
 
@@ -25,16 +25,16 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
     return [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
 
 
-def update_aliases(context, actions):
+def update_aliases(conn_id, actions):
     return http_hook_post(
-        context["conn_id"],
+        conn_id,
         "/_aliases/",
         json.dumps({"actions": actions}),
     )
 
 
 @dag(
-    dag_display_name="Fix Aliases",
+    dag_display_name="Reconcile Aliases",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     schedule=None,
@@ -50,7 +50,7 @@ def update_aliases(context, actions):
     },
     render_template_as_native_obj=True,
 )
-def fix_aliases_dag():
+def reconcile_aliases_dag():
 
     @task_group
     def read_alias(upstream: Context) -> Context:
@@ -58,11 +58,13 @@ def fix_aliases_dag():
 
         @task
         def fetch(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+
             tenant: str = context["tenant"]
             discovered = fetch_indices(
-                prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"]
+                prefix=f"seaas-{tenant}-*", conn_id=conn_id
             )
-            aliased = fetch_indices(prefix=tenant, conn_id=context["conn_id"])
+            aliased = fetch_indices(prefix=tenant, conn_id=conn_id)
             return success(
                 context=context,
                 stage=stage,
@@ -85,16 +87,20 @@ def fix_aliases_dag():
         @task
         @chain_on_error_in_stage(stage=stage)
         def fix(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
+
+
             alias = context["tenant"]
             actions = [
                 {"add": {"index": index, "alias": alias, "is_write_index": False}}
                 for index in context["error"]
             ]
             print(
-                f"Updating {context['tenant']} alias (dry-run={context['dry_run']})\n{json.dumps(actions, indent=2)}"
+                f"Updating {context['tenant']} alias (dry-run={dry_run})\n{json.dumps(actions, indent=2)}"
             )
-            if not context["dry_run"]:
-                response = update_aliases(context=context, actions=actions)
+            if not dry_run:
+                response = update_aliases(conn_id, actions=actions)
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
             return success(context=context, stage=stage)
@@ -107,9 +113,11 @@ def fix_aliases_dag():
 
         @task
         def fetch(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+
             tenant: str = context["tenant"]
             results = http_hook_get(
-                conn_id=context["conn_id"], endpoint=f"/{tenant}/_alias"
+                conn_id=conn_id, endpoint=f"/{tenant}/_alias"
             )
             active_aliases = defaultdict(list)
             retention = context["retention"]
@@ -150,6 +158,9 @@ def fix_aliases_dag():
         @task
         @chain_on_error_in_stage(stage=stage)
         def fix(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
+
             actions = []
             for alias, indices in context["error"].items():
                 if any(i["is_write_index"] is True for i in indices):
@@ -172,10 +183,10 @@ def fix_aliases_dag():
                     for i in indices
                 ]
             print(
-                f"Updating {context['tenant']} alias (dry-run={context['dry_run']})\n{json.dumps(actions, indent=2)}"
+                f"Updating {context['tenant']} alias (dry-run={dry_run})\n{json.dumps(actions, indent=2)}"
             )
-            if not context["dry_run"]:
-                response = update_aliases(context=context, actions=actions)
+            if not dry_run:
+                response = update_aliases(conn_id, actions=actions)
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
             return success(context=context, stage=stage)
@@ -188,11 +199,13 @@ def fix_aliases_dag():
 
         @task
         def fetch(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+
             tenant: str = context["tenant"]
-            read = fetch_indices(prefix=tenant, conn_id=context["conn_id"])
+            read = fetch_indices(prefix=tenant, conn_id=conn_id)
 
             results = http_hook_get(
-                context["conn_id"], f"/_cat/aliases/{tenant}-rollover"
+                conn_id, f"/_cat/aliases/{tenant}-rollover"
             )
             rollover = {
                 r["index"]: r["is_write_index"] == "true"
@@ -230,6 +243,9 @@ def fix_aliases_dag():
         @task
         @chain_on_error_in_stage(stage=stage)
         def fix(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
+
             alias = f"{context['tenant']}-rollover"
             actions = [
                 {
@@ -245,10 +261,10 @@ def fix_aliases_dag():
             ]
 
             print(
-                f"Updating {context['tenant']} alias (dry-run={context['dry_run']})\n{json.dumps(actions, indent=2)}"
+                f"Updating {context['tenant']} alias (dry-run={dry_run})\n{json.dumps(actions, indent=2)}"
             )
-            if not context["dry_run"]:
-                response = update_aliases(context=context, actions=actions)
+            if not dry_run:
+                response = update_aliases(conn_id, actions=actions)
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
             return success(context=context, stage=stage)
@@ -258,11 +274,10 @@ def fix_aliases_dag():
     initial_context = Context(
         tenant="{{ params.tenant }}",
         tenant_id="{{ params.tenant_id }}",
-        retention="{{ params.retention }}",
-        conn_id="{{ params.conn_id }}",
-        dry_run="{{ params.dry_run }}",
+        retention="{{ params.retention }}"
     )
-    rollover_alias(upstream=write_alias(upstream=read_alias(upstream=initial_context)))
+
+    rollover_alias(upstream=(write_alias(upstream=(read_alias(upstream=initial_context)))))
 
 
-fix_aliases_dag()
+reconcile_aliases_dag()

@@ -1,12 +1,8 @@
 import json
-import os
 from typing import List
 
 from airflow.decorators import dag, task
 from airflow.models import Param
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from fix_and_verify import (
     INDEX_REGEX,
@@ -19,7 +15,7 @@ from utils import (
     chain_on_error_in_stage,
     Context,
     success,
-    failure,
+    failure, param_value,
 )
 
 
@@ -33,7 +29,7 @@ def create_index(index, payload, conn_id):
 
 
 @dag(
-    dag_display_name="Fix Monthly Indices",
+    dag_display_name="Reconcile Monthly Indices",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     schedule=None,
@@ -49,22 +45,24 @@ def create_index(index, payload, conn_id):
     },
     render_template_as_native_obj=True,
 )
-def fix_monthly_indices_dag():
+def reconcile_monthly_indices_dag():
     @task
     def fetch(context: Context) -> Context:
+        conn_id = param_value("conn_id")
+
         tenant: str = context["tenant"]
-        fetched = fetch_indices(prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"])
+        fetched = fetch_indices(prefix=f"seaas-{tenant}-*", conn_id=conn_id)
         latest_suffix = 0
         for index in fetched:
             m = INDEX_REGEX.fullmatch(index).groupdict()
-            assert (
-                int(m["tenant_id"]) == context["tenant_id"]
-            ), f"{index}: {m['tenant_id']} != {context['tenant_id']}"
+            if int(m["tenant_id"]) != context["tenant_id"]:
+                return failure(context, "fetch",
+                               f"{index}: tenant_id mismatch {m['tenant_id']} != {context['tenant_id']}")
             latest_suffix = max(latest_suffix, int(m["suffix"]))
 
         context.update({"latest_suffix": latest_suffix})
 
-        return success(context, tenant, value=fetched)
+        return success(context=context, stage="fetch", value=fetched)
 
     @task
     def verify(context: Context) -> Context:
@@ -85,6 +83,9 @@ def fix_monthly_indices_dag():
     @task
     @chain_on_error_in_stage(stage="verify")
     def fix(context: Context) -> None:
+        conn_id = param_value("conn_id")
+        dry_run = param_value("dry_run")
+
         suffix = context["latest_suffix"]
 
         for write_alias in context["error"]:
@@ -102,21 +103,18 @@ def fix_monthly_indices_dag():
                 },
             }
             print(
-                f"Creating index: {index} (dry-run={context['dry_run']})\n{json.dumps(payload, indent=2)}"
+                f"Creating index: {index} (dry-run={dry_run})\n{json.dumps(payload, indent=2)}"
             )
-            if not context["dry_run"]:
-                response = create_index(index, payload, context["conn_id"])
+            if not dry_run:
+                response = create_index(index, payload, conn_id)
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
     initial_context = Context(
         tenant="{{ params.tenant }}",
         tenant_id="{{ params.tenant_id }}",
         retention="{{ params.retention }}",
-        conn_id="{{ params.conn_id }}",
-        dry_run="{{ params.dry_run }}",
     )
 
     fix(verify(fetch(initial_context)))
 
-
-fix_monthly_indices_dag()
+reconcile_monthly_indices_dag()
