@@ -272,11 +272,11 @@ def reconcile_wordtags_indices_dag():
         }
 
     cfg = runtime_config()
-    t1 = fetch_indices_per_tenant(config=cfg)
-    t2 = ilm_settings(upstream=t1, config=cfg)
-    t3 = index_templates(upstream=t2, config=cfg)
-    t4 = monthly_indices(upstream=t3, config=cfg)
-    t5 = aliases(upstream=t4, config=cfg)
+    t1 = fetch_indices_per_tenant(config=cfg.output)
+    t2 = ilm_settings(upstream=t1, config=cfg.output)
+    t3 = index_templates(upstream=t2, config=cfg.output)
+    t4 = monthly_indices(upstream=t3, config=cfg.output)
+    t5 = aliases(upstream=t4, config=cfg.output)
 
 
 reconcile_wordtags_indices_dag()
