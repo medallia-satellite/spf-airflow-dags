@@ -24,7 +24,7 @@ from utils import (
     success,
     failure,
     wait_for_completion,
-    select_eligible_for_fix, param_value,
+    select_eligible_for_fix,
 )
 
 
