@@ -21,7 +21,7 @@ from utils import (
     chain_on_error_in_stage,
     Context,
     success,
-    failure, xcom_push,
+    failure, xcom_push, param_value,
 )
 
 
@@ -54,8 +54,10 @@ def create_index(index, payload, conn_id):
 def reconcile_monthly_indices_dag():
     @task
     def fetch(context: Context) -> Context:
+        conn_id = param_value("conn_id")
+
         tenant: str = context["tenant"]
-        fetched = fetch_indices(prefix=f"seaas-{tenant}-*", conn_id=context["conn_id"])
+        fetched = fetch_indices(prefix=f"seaas-{tenant}-*", conn_id=conn_id)
         latest_suffix = 0
         for index in fetched:
             m = INDEX_REGEX.fullmatch(index).groupdict()
@@ -87,6 +89,9 @@ def reconcile_monthly_indices_dag():
     @task
     @chain_on_error_in_stage(stage="verify")
     def fix(context: Context) -> None:
+        conn_id = param_value("conn_id")
+        dry_run = param_value("dry_run")
+
         suffix = context["latest_suffix"]
 
         for write_alias in context["error"]:
@@ -104,10 +109,10 @@ def reconcile_monthly_indices_dag():
                 },
             }
             print(
-                f"Creating index: {index} (dry-run={context['dry_run']})\n{json.dumps(payload, indent=2)}"
+                f"Creating index: {index} (dry-run={dry_run})\n{json.dumps(payload, indent=2)}"
             )
-            if not context["dry_run"]:
-                response = create_index(index, payload, context["conn_id"])
+            if not dry_run:
+                response = create_index(index, payload, conn_id)
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
     @task
