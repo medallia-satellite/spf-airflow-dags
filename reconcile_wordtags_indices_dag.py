@@ -55,7 +55,6 @@ def fetch_indices(prefix: str, conn_id: str) -> List[str]:
 def reconcile_wordtags_indices_dag():
     @task
     def fetch_indices_per_tenant(config: dict) -> List[Context]:
-
         fetched = http_hook_get(config["conn_id"], "/_cat/indices?h=index&format=json")
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
@@ -86,8 +85,10 @@ def reconcile_wordtags_indices_dag():
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
+            conn_id = xcom_pull("runtime_config", "conn_id")
+
             results = http_hook_get(
-                config["conn_id"],
+                conn_id,
                 "/_settings/index.lifecycle.name,index.lifecycle.rollover_alias",
             )
             for k, v in results.items():
