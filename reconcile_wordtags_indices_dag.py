@@ -85,7 +85,7 @@ def reconcile_wordtags_indices_dag():
 
         @task
         def fetch(data: List[Context]) -> List[Context]:
-            conn_id = xcom_pull("runtime_config", "conn_id")
+            conn_id = xcom_pull("runtime_config")
 
             results = http_hook_get(
                 conn_id,
