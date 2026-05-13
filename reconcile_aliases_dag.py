@@ -277,7 +277,8 @@ def reconcile_aliases_dag():
         retention="{{ params.retention }}"
     )
 
-    rollover_alias(upstream=(write_alias(upstream=(read_alias(upstream=initial_context)))))
+    write_alias(upstream=(read_alias(upstream=initial_context)))
+    # rollover_alias(upstream=(w))
 
 
 reconcile_aliases_dag()
