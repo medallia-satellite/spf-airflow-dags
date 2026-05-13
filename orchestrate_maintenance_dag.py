@@ -8,7 +8,7 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
     tags=["spf", "elasticsearch"],
     description="This DAG uses 'orchestrate_dag_targets' as targets to trigger maintenance workflows.",
     max_active_runs=1,
-    schedule=None,
+    schedule="@weekly",
     catchup=False,
     render_template_as_native_obj=True,
 )
