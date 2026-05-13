@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from airflow.decorators import dag
 from airflow.models import Variable
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
@@ -9,6 +11,7 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
     description="This DAG uses 'orchestrate_dag_targets' as targets to trigger maintenance workflows.",
     max_active_runs=1,
     schedule="@weekly",
+    start_date=datetime(2026, 5, 13),
     catchup=False,
     render_template_as_native_obj=True,
 )
