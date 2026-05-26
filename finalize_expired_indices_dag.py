@@ -120,7 +120,7 @@ def finalize_expired_indices_dag():
                     error=f"Invalid policies: {set(policies)}",
                 )
 
-            if not all(r == f"{context['tenant']}-rollover" for r in rollover):
+            if not rollover or not all(r == f"{context['tenant']}-rollover" for r in rollover):
                 return failure(
                     context=context,
                     stage=stage,
