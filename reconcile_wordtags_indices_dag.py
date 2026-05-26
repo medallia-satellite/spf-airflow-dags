@@ -114,7 +114,7 @@ def reconcile_wordtags_indices_dag():
                 )
 
             policies = [il.get("name") for il in il_list]
-            rollover = [il.get("rollover_alias") for il in il_list]
+            rollover = [il.get("rollover_alias") for il in il_list if il.get("rollover_alias")]
 
             if (
                 len(set(POLICY_MAPPING.get(p) for p in policies)) != 1
