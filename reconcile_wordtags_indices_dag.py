@@ -160,6 +160,13 @@ def reconcile_wordtags_indices_dag():
             index_template = xcom_pull(
                 "index_templates.fetch", f'{context["tenant"]}-rollover'
             )
+            if not index_template:
+                return failure(
+                    context=context,
+                    stage=stage,
+                    error=f"Index template not found",
+                )
+
             comparable = {k: v for k, v in index_template.items() if k != "composed_of"}
             if comparable != expected_index_template(
                 tenant=context["tenant"], retention_months=context["retention"]
