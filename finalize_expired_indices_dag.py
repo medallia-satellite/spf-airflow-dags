@@ -158,13 +158,19 @@ def finalize_expired_indices_dag():
                 print(
                     f"Marking indexing as completed (dry-run={param_value('dry_run')}): {index}"
                 )
-                if not param_value("dry_run"):
-                    response = update_index_settings(
-                        param_value("conn_id"),
-                        index,
-                        {"index.lifecycle.indexing_complete": True},
-                    )
-                    print(f"Response:\n{json.dumps(response, indent=2)}")
+                if param_value("dry_run"):
+                    continue
+
+                details = extract_index_details(index)
+                response = update_index_settings(
+                    param_value("conn_id"),
+                    index,
+                    {
+                        "index.lifecycle.indexing_complete": True,
+                        "index.lifecycle.origination_date": details["origination_date"]
+                    },
+                )
+                print(f"Response:\n{json.dumps(response, indent=2)}")
             return success(context=context, stage=stage)
 
         verified = verify.expand(context=upstream)
