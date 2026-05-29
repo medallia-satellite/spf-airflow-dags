@@ -1,3 +1,4 @@
+import json
 from collections import defaultdict
 from typing import List, Tuple
 
@@ -23,7 +24,7 @@ from utils import (
     success,
     failure,
     wait_for_completion,
-    select_eligible_for_fix, param_value,
+    select_eligible_for_fix, param_value, http_hook_put,
 )
 
 
@@ -179,9 +180,38 @@ def reconcile_wordtags_indices_dag():
 
             return success(context=context, stage=stage)
 
+        @task
+        def fix(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
+
+            template_name = f"{context['tenant']}-rollover"
+            index_template = json.dumps(expected_index_template(
+                    tenant=context["tenant"],
+                    retention_months=context["retention"],
+                ))
+
+            print(
+                f"Creating Index template: {template_name} (dry-run={dry_run})\n{json.dumps(index_template, indent=2)}"
+            )
+
+            if not dry_run:
+                response = http_hook_put(
+                    conn_id,
+                    f"_index_template/{template_name}",
+                    json.dumps(index_template)
+                )
+                print(f"Response:\n{json.dumps(response, indent=2)}")
+
+
+            return success(context=context, stage=stage)
+
         verified = verify.expand(context=fetch(upstream))
-        select_eligible_for_fix(upstream=verified, stage=stage)
-        return verified
+        eligible = select_eligible_for_fix(upstream=verified, stage=stage)
+        fixed = fix.expand(context=eligible)
+        t = wait_for_completion(upstream=verified)
+        fixed >> t
+        return t
 
     @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
