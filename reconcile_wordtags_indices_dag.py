@@ -281,8 +281,8 @@ def reconcile_wordtags_indices_dag():
         return t
 
     t1 = fetch_indices_per_tenant()
-    t2 = index_templates(upstream=t1)
-    t3 = ilm_settings(upstream=t2)
+    t2 = ilm_settings(upstream=t1)
+    t3 = index_templates(upstream=t2)
     t4 = monthly_indices(upstream=t3)
     t5 = aliases(upstream=t4)
 
