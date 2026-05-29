@@ -186,10 +186,10 @@ def reconcile_wordtags_indices_dag():
             dry_run = param_value("dry_run")
 
             template_name = f"{context['tenant']}-rollover"
-            index_template = json.dumps(expected_index_template(
+            index_template = expected_index_template(
                     tenant=context["tenant"],
                     retention_months=context["retention"],
-                ))
+                )
 
             print(
                 f"Creating Index template: {template_name} (dry-run={dry_run})\n{json.dumps(index_template, indent=2)}"
