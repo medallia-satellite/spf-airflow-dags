@@ -247,8 +247,9 @@ def reconcile_aliases_dag():
             dry_run = param_value("dry_run")
 
             alias = f"{context['tenant']}-rollover"
-            actions = [
-                {
+            actions = []
+            for index in context["error"]:
+                action = {
                     "add": {
                         "index": index,
                         "alias": alias,
@@ -257,8 +258,10 @@ def reconcile_aliases_dag():
                         ],
                     }
                 }
-                for index in context["error"]
-            ]
+                if not extract_index_details(index)["should_rollover"]:
+                    action["add"]["is_write_index"] = False
+
+                actions.append(action)
 
             print(
                 f"Updating {context['tenant']} alias (dry-run={dry_run})\n{json.dumps(actions, indent=2)}"
@@ -277,8 +280,6 @@ def reconcile_aliases_dag():
         retention="{{ params.retention }}"
     )
 
-    write_alias(upstream=(read_alias(upstream=initial_context)))
-    # rollover_alias(upstream=(w))
-
+    rollover_alias(upstream=write_alias(upstream=(read_alias(upstream=initial_context))))
 
 reconcile_aliases_dag()
