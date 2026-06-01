@@ -253,9 +253,6 @@ def reconcile_aliases_dag():
                     "add": {
                         "index": index,
                         "alias": alias,
-                        "is_write_index": extract_index_details(index)[
-                            "should_rollover"
-                        ],
                     }
                 }
                 if not extract_index_details(index)["should_rollover"]:
