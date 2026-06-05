@@ -63,7 +63,15 @@ def reconcile_wordtags_indices_dag():
     def fetch_indices_per_tenant() -> List[Context]:
         conn_id = param_value("conn_id")
 
-        fetched = http_hook_get(conn_id, "/_cat/indices?h=index&format=json")
+        fetched = http_hook_get(
+            conn_id,
+            "/_cat/indices",
+            params={
+                "h": "index",
+                "format": "json",
+            }
+        )
+
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -277,18 +285,54 @@ def reconcile_wordtags_indices_dag():
             indices = fetch_indices(
                 prefix=f"seaas-{tenant}-*", conn_id=conn_id
             )
-            alias_per_index = {i: [] for i in indices}
-            results = http_hook_get(conn_id, f"/_cat/aliases/{tenant}*")
-            for r in results:
-                alias_per_index[r["index"]].append(r["alias"])
-            return success(context=context, stage=stage, value=alias_per_index)
+
+            # read alias
+            response = http_hook_get(
+                conn_id,
+                f"/_cat/aliases/{tenant}",
+                params={"s": "index", "format": "json", "h": "alias,index,is_write_index"},
+            )
+            read_alias = [r["index"] for r in response]
+
+            # write alias
+            response = http_hook_get(
+                conn_id,
+                f"/_cat/aliases/{tenant}-20*",
+                params={"s": "index", "format": "json", "h": "alias,index,is_write_index"},
+            )
+            write_alias = defaultdict(list)
+            for r in response:
+                write_alias[r["alias"]].append((r["index"], r["is_write_index"]))
+
+            # rollover alias
+            response = http_hook_get(
+                conn_id,
+                f"/_cat/aliases/{tenant}-rollover",
+                params={"s": "index", "format": "json", "h": "alias,index,is_write_index"},
+            )
+            rollover_alias = response[-1]
+
+            return success(context=context, stage=stage, value={
+                "read_alias": read_alias,
+                "write_alias": write_alias,
+                "rollover_alias": rollover_alias,
+            })
 
         @task
         @chain_on_success
         def verify(context: Context) -> Context:
-            # Each index should have read, write and rollover aliases
-            if any(len(a) != 3 for a in context["value"].values()):
-                return failure(context=context, stage=stage)
+            if not context["value"]["rollover_alias"]["is_write_index"]:
+                return failure(context=context, error=context["value"]["rollover_alias"], stage=stage)
+
+            for write_alias in generate_write_aliases(
+                    context["tenant"], context["retention"]
+            ):
+                if not any(is_write_index is True for _, is_write_index in context["value"]["write_alias"].get(write_alias)):
+                    return failure(context=context, error=context["value"]["write_alias"], stage=stage)
+
+                if any(index not in context["value"]["read_alias"] for index, _ in context["value"]["write_alias"].get(write_alias)):
+                    return failure(context=context, error=context["value"]["read_alias"], stage=stage)
+
             return success(context=context, stage=stage)
 
         @task
