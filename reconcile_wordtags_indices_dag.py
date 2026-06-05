@@ -334,9 +334,19 @@ def reconcile_wordtags_indices_dag():
             return success(
                 context=context,
                 stage=stage,
-                value=actions)
+                value=actions,
+            )
 
-        return reconcile.expand(context=upstream)
+        @task
+        def report(contexts: List[Context]) -> None:
+            for i, c in enumerate(contexts):
+                if c["value"] and c["stage"] == stage:
+                    print(f"{i}: {c['tenant']} - {c['value']}")
+
+        r = reconcile.expand(context=upstream)
+        report(r)
+
+        return r
 
     t1 = fetch_indices_per_tenant()
     t2 = ilm_settings(upstream=t1)
