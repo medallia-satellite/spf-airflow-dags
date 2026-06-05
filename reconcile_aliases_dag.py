@@ -83,7 +83,7 @@ def reconcile_aliases_dag():
             if not any(is_write_index is True for _, is_write_index in write_alias.get(monthly_alias)):
                 actions.append({
                     "add": {
-                        "index": write_alias.get(monthly_alias)[-1],
+                        "index": write_alias.get(monthly_alias)[-1][0],
                         "alias": monthly_alias,
                         "is_write_index": True,
                     }
