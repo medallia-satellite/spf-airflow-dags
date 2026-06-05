@@ -282,10 +282,6 @@ def reconcile_wordtags_indices_dag():
             conn_id = param_value("conn_id")
 
             tenant = context["tenant"]
-            indices = fetch_indices(
-                prefix=f"seaas-{tenant}-*", conn_id=conn_id
-            )
-
             # read alias
             response = http_hook_get(
                 conn_id,
