@@ -34,7 +34,14 @@ def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, boo
 
 
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:
-    results = http_hook_get(conn_id, f"/_cat/indices/{prefix}*?h=index&format=json")
+    results = http_hook_get(
+        conn_id,
+        f"/_cat/indices/{prefix}*",
+        params={
+            "h": "index",
+            "format": "json",
+        }
+    )
     return [r["index"] for r in results]
 
 

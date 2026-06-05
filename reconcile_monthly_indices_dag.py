@@ -20,7 +20,11 @@ from utils import (
 
 
 def fetch_indices(prefix: str, conn_id: str) -> List[str]:
-    results = http_hook_get(conn_id, f"/_cat/indices/{prefix}?h=index&format=json")
+    results = http_hook_get(
+        conn_id,
+        f"/_cat/indices/{prefix}",
+        params={"h": "index", "s": "index", "format": "json"},
+    )
     return [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
 
 
