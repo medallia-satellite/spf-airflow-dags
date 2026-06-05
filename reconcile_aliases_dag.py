@@ -64,56 +64,34 @@ def reconcile_aliases_dag():
         tenant = context["tenant"]
         actions = []
 
-        # read alias
-        response = get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}")
-        read_alias = [r["index"] for r in response]
+        read_alias = [r["index"] for r in get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}")]
 
-        # write alias
-        response = get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}-20*")
         write_alias = defaultdict(list)
-        for r in response:
+        for r in get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}-20*"):
             write_alias[r["alias"]].append((r["index"], r["is_write_index"]))
 
         for monthly_alias in generate_write_aliases(
                 context["tenant"], context["retention"]
         ):
             if not any(is_write_index == "true" for _, is_write_index in write_alias.get(monthly_alias)):
-                print(write_alias.get(monthly_alias))
+                latest_index = write_alias.get(monthly_alias)[-1][0]
                 actions.append({
-                    "add": {
-                        "index": write_alias.get(monthly_alias)[-1][0],
-                        "alias": monthly_alias,
-                        "is_write_index": True,
-                    }
+                    "add": {"index": latest_index, "alias": monthly_alias, "is_write_index": True}
                 })
 
             for index, _ in write_alias.get(monthly_alias):
                 if not index in read_alias:
                     actions.append({
-                        "add": {
-                            "index": index,
-                            "alias": tenant,
-                            "is_write_index": False,
-                        }
+                        "add": {"index": index, "alias": tenant, "is_write_index": False}
                     })
 
-        # rollover alias
-        response = get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}-rollover")
-        rollover_alias = response[-1]
-        if not rollover_alias["is_write_index"] == "true":
+        rollover = get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}-rollover")[-1]
+        if not rollover["is_write_index"] == "true":
             actions.append({
-                "add": {
-                    "index": f"seaas-{tenant}-*",
-                    "alias": f"{tenant}-rollover",
-                    "is_write_index": False,
-                }
+                "add": {"index": f"seaas-{tenant}-*", "alias": f"{tenant}-rollover", "is_write_index": False}
             })
             actions.append({
-                "add": {
-                    "index": rollover_alias["index"],
-                    "alias": f"{tenant}-rollover",
-                    "is_write_index": True,
-                }
+                "add": {"index": rollover["index"], "alias": f"{tenant}-rollover", "is_write_index": True}
             })
 
         if actions and not dry_run:
