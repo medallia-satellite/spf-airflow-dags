@@ -1,6 +1,5 @@
 import json
 import logging
-import pprint
 from collections import defaultdict
 from typing import List, Tuple
 
@@ -343,7 +342,8 @@ def reconcile_wordtags_indices_dag():
         def report(contexts: List[Context]) -> None:
             for i, c in enumerate(contexts):
                 if c["value"] and c["stage"] == stage:
-                    logging.info(f"{i}: {c['tenant']}\n{pprint.pprint(c['value'])}")
+                    logging.info(f"{i}: {c['tenant']}\n{c['value']}")
+
 
         r = reconcile.expand(context=upstream)
         report(r)
