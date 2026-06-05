@@ -137,7 +137,7 @@ def reconcile_aliases_dag():
         retention="{{ params.retention }}"
     )
 
-    reconcile(upstream=initial_context)
+    reconcile(context=initial_context)
 
 
 reconcile_aliases_dag()
