@@ -2,7 +2,7 @@ import json
 from collections import defaultdict
 from typing import List
 
-from airflow.decorators import dag, task, task_group
+from airflow.decorators import dag, task
 from airflow.models import Param
 
 from fix_and_verify import (
@@ -55,9 +55,6 @@ def get_sorted_aliases(conn_id: str, endpoint: str):
     render_template_as_native_obj=True,
 )
 def reconcile_aliases_dag():
-    # get write aliases for all indices, check that there is one write index, if not the highest index should be the one
-    # all of them should be included in the read alias
-    # last index should be the one to rollover, the rest should be false
     stage = "reconcile_aliases"
 
     @task
@@ -119,7 +116,6 @@ def reconcile_aliases_dag():
                 }
             })
 
-        print(actions)
         if actions and not dry_run:
             response = update_aliases(conn_id, actions=actions)
             print(f"Response:\n{json.dumps(response, indent=2)}")
@@ -127,11 +123,7 @@ def reconcile_aliases_dag():
         return success(
             context=context,
             stage=stage,
-            value={
-                "read_alias": read_alias,
-                "write_alias": write_alias,
-                "rollover_alias": rollover_alias,
-            })
+            value=actions)
 
     initial_context = Context(
         tenant="{{ params.tenant }}",
