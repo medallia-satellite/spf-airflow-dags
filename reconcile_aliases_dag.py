@@ -118,6 +118,7 @@ def reconcile_aliases_dag():
                 }
             })
 
+        print(actions)
         if actions and not dry_run:
             response = update_aliases(conn_id, actions=actions)
             print(f"Response:\n{json.dumps(response, indent=2)}")
