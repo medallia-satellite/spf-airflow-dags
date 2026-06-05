@@ -80,7 +80,7 @@ def reconcile_aliases_dag():
         for monthly_alias in generate_write_aliases(
                 context["tenant"], context["retention"]
         ):
-            if not any(is_write_index is True for _, is_write_index in write_alias.get(monthly_alias)):
+            if not any(is_write_index == "true" for _, is_write_index in write_alias.get(monthly_alias)):
                 print(write_alias.get(monthly_alias))
                 actions.append({
                     "add": {
@@ -103,7 +103,7 @@ def reconcile_aliases_dag():
         # rollover alias
         response = get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}-rollover")
         rollover_alias = response[-1]
-        if not rollover_alias["is_write_index"]:
+        if not rollover_alias["is_write_index"] == "true":
             actions.append({
                 "add": {
                     "index": f"seaas-{tenant}-*",
