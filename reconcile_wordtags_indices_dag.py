@@ -342,7 +342,7 @@ def reconcile_wordtags_indices_dag():
         def report(contexts: List[Context]) -> None:
             for i, c in enumerate(contexts):
                 if c["value"] and c["stage"] == stage:
-                    print(f"{i}: {c['tenant']} - {pprint.pprint(c['value'])}")
+                    print(f"{i}: {c['tenant']}\n{pprint.pprint(c['value'])}")
 
         r = reconcile.expand(context=upstream)
         report(r)
