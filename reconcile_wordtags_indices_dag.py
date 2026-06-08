@@ -68,6 +68,7 @@ def reconcile_wordtags_indices_dag():
             conn_id,
             "/_cat/indices",
             params={
+                "s": "index",
                 "h": "index",
                 "format": "json",
             }
@@ -229,8 +230,71 @@ def reconcile_wordtags_indices_dag():
         fixed >> t
         return t
 
+
     @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
+        stage = "monthly_indices"
+
+        def create_index(index, payload, conn_id):
+            return http_hook_put(conn_id, index, json.dumps(payload))
+
+        @task
+        @chain_on_success
+        def reconcile(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
+
+            suffix = context["latest_suffix"]
+
+            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
+            missing = []
+            for write_alias in generate_write_aliases(
+                context["tenant"], context["retention"]
+            ):
+                if not any(
+                    index.startswith(f"seaas-{write_alias}") for index in indices
+                ):
+                    missing.append(write_alias)
+
+            for write_alias in missing:
+                suffix += 1
+                index = f'seaas-{write_alias}-{context["tenant_id"]}-{suffix:06}'
+                details = extract_index_details(index)
+                policy = f'M{context["retention"]}_rollover' if details["should_rollover"] else f'M{context["retention"]}'
+                payload = {
+                    "settings": {
+                        "index.lifecycle.origination_date": details["origination_date"],
+                        "index.lifecycle.name": policy,
+                    },
+                    "aliases": {
+                        details["read_alias"]: {"is_write_index": False},
+                        details["write_alias"]: {"is_write_index": True},
+                        details["rollover_alias"]: {"is_write_index": False},
+                    },
+                }
+                print(
+                    f"Creating index: {index} (dry-run={dry_run})\n{json.dumps(payload, indent=2)}"
+                )
+                if not dry_run:
+                    response = create_index(index, payload, conn_id)
+                    print(f"Response:\n{json.dumps(response, indent=2)}")
+
+            return success(context=context, stage=stage)
+
+        @task
+        def report(contexts: List[Context]) -> None:
+            for i, c in enumerate(contexts):
+                if c["value"] and c["stage"] == stage:
+                    logging.info(f"{i}: {c['tenant']}\n{c['value']}")
+
+
+        r = reconcile.expand(context=upstream)
+        report(r)
+
+        return r
+
+    @task_group
+    def monthly_indices_old(upstream: List[Context]) -> List[Context]:
         stage = "monthly_indices"
 
         @task
