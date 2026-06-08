@@ -26,11 +26,6 @@ from utils import (
 )
 
 
-def fetch_indices(prefix: str, conn_id: str) -> List[str]:
-    results = http_hook_get(conn_id, f"/_cat/indices/{prefix}*?h=index&format=json")
-    return [r["index"] for r in results]
-
-
 def update_index_settings(conn_id: str, index, payload):
     return http_hook_put(conn_id, f"{index}/_settings", json.dumps(payload))
 
@@ -51,7 +46,11 @@ def update_index_settings(conn_id: str, index, payload):
 def finalize_expired_indices_dag():
     @task
     def fetch_indices_per_tenant() -> List[Context]:
-        fetched = http_hook_get(param_value("conn_id"), "/_cat/indices?h=index&format=json")
+        fetched = http_hook_get(
+            param_value("conn_id"),
+            "/_cat/indices",
+            params={"h": "index", "format": "json"},
+        )
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[

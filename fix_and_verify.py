@@ -109,7 +109,7 @@ def extract_index_details(index):
         "write_alias": ALIAS_REGEX_MAPPING["write"].search(index).group(0),
         "should_rollover": (
             datetime.date.fromisoformat(month)
-            == datetime.date.today().replace(day=1) + relativedelta(months=1)
+            >= datetime.date.today().replace(day=1) + relativedelta(months=1)
         ),
     }
 

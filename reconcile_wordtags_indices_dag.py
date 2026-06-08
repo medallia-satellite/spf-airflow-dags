@@ -1,10 +1,10 @@
 import json
+import logging
 from collections import defaultdict
-from typing import List, Tuple
+from typing import List
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from fix_and_verify import (
     BASE_REGEX,
@@ -24,18 +24,9 @@ from utils import (
     success,
     failure,
     wait_for_completion,
-    select_eligible_for_fix, param_value, http_hook_put,
+    select_eligible_for_fix, param_value, http_hook_put, http_hook_post,
 )
 
-
-def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
-    results = http_hook_get(conn_id, f"/_cat/aliases/{alias}")
-    return [(i["index"], i["alias"], i["is_write_index"] == "true") for i in results]
-
-
-def fetch_indices(prefix: str, conn_id: str) -> List[str]:
-    results = http_hook_get(conn_id, f"/_cat/indices/{prefix}*?h=index&format=json")
-    return [r["index"] for r in results]
 
 
 @dag(
@@ -56,7 +47,16 @@ def reconcile_wordtags_indices_dag():
     def fetch_indices_per_tenant() -> List[Context]:
         conn_id = param_value("conn_id")
 
-        fetched = http_hook_get(conn_id, "/_cat/indices?h=index&format=json")
+        fetched = http_hook_get(
+            conn_id,
+            "/_cat/indices",
+            params={
+                "s": "index",
+                "h": "index",
+                "format": "json",
+            }
+        )
+
         results = defaultdict(list)
         for index in [r["index"] for r in fetched if INDEX_REGEX.match(r["index"])]:
             results[
@@ -219,96 +219,136 @@ def reconcile_wordtags_indices_dag():
 
         @task
         @chain_on_success
-        def verify(context: Context) -> Context:
+        def reconcile(context: Context) -> Context:
+            conn_id = param_value("conn_id")
+            dry_run = param_value("dry_run")
+
+            suffix = context["latest_suffix"]
+
             indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
+            missing = []
             for write_alias in generate_write_aliases(
                 context["tenant"], context["retention"]
             ):
                 if not any(
                     index.startswith(f"seaas-{write_alias}") for index in indices
                 ):
-                    return failure(context=context, stage=stage)
-            return success(context=context, stage=stage)
+                    missing.append(write_alias)
+
+            for write_alias in missing:
+                suffix += 1
+                index = f'seaas-{write_alias}-{context["tenant_id"]}-{suffix:06}'
+                details = extract_index_details(index)
+                policy = f'M{context["retention"]}_rollover' if details["should_rollover"] else f'M{context["retention"]}'
+                payload = {
+                    "settings": {
+                        "index.lifecycle.origination_date": details["origination_date"],
+                        "index.lifecycle.name": policy,
+                    },
+                    "aliases": {
+                        details["read_alias"]: {"is_write_index": False},
+                        details["write_alias"]: {"is_write_index": True},
+                        details["rollover_alias"]: {"is_write_index": False},
+                    },
+                }
+                print(
+                    f"Creating index: {index} (dry-run={dry_run})\n{json.dumps(payload, indent=2)}"
+                )
+                if not dry_run:
+                    response = http_hook_put(conn_id, index, json.dumps(payload))
+                    print(f"Response:\n{json.dumps(response, indent=2)}")
+
+            return success(context=context, stage=stage, value=missing)
 
         @task
-        def build_config(context: Context) -> dict:
-            conn_id = param_value("conn_id")
-            dry_run = param_value("dry_run")
+        def report(contexts: List[Context]) -> None:
+            for i, c in enumerate(contexts):
+                if c["value"] and c["stage"] == stage:
+                    logging.info(f"{i}: {c['tenant']}\n{c['value']}")
 
-            return {
-                "conn_id": conn_id,
-                "dry_run": dry_run,
-                **context
-            }
 
-        verified = verify.expand(context=upstream)
-        eligible = select_eligible_for_fix(upstream=verified, stage=stage)
-        config = build_config.expand(context=eligible)
-        trigger = (
-            TriggerDagRunOperator.partial(
-                task_id=f"reconcile_monthly_indices",
-                trigger_dag_id="reconcile_monthly_indices_dag",
-                wait_for_completion=True,
-            )
-            .expand(conf=config)
-        )
+        r = reconcile.expand(context=upstream)
+        report(r)
 
-        t = wait_for_completion(upstream=verified)
-        trigger >> t
-        return t
+        return r
 
     @task_group
     def aliases(upstream: Context) -> List[Context]:
+        def fetch_aliases(conn_id: str, endpoint: str):
+            return http_hook_get(
+                conn_id,
+                endpoint,
+                params={
+                    "s": "index",
+                    "format": "json",
+                    "h": "alias,index,is_write_index"
+                },
+            )
+
         stage = "aliases"
 
         @task
         @chain_on_success
-        def fetch(context: Context) -> Context:
-            conn_id = param_value("conn_id")
-
-            tenant = context["tenant"]
-            indices = fetch_indices(
-                prefix=f"seaas-{tenant}-*", conn_id=conn_id
-            )
-            alias_per_index = {i: [] for i in indices}
-            results = http_hook_get(conn_id, f"/_cat/aliases/{tenant}*")
-            for r in results:
-                alias_per_index[r["index"]].append(r["alias"])
-            return success(context=context, stage=stage, value=alias_per_index)
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            # Each index should have read, write and rollover aliases
-            if any(len(a) != 3 for a in context["value"].values()):
-                return failure(context=context, stage=stage)
-            return success(context=context, stage=stage)
-
-        @task
-        def build_config(context: Context) -> dict:
-            conn_id = param_value("conn_id")
+        def reconcile(context: Context) -> Context:
             dry_run = param_value("dry_run")
+            conn_id = param_value("conn_id")
+            tenant = context["tenant"]
+            actions = []
 
-            return {
-                "conn_id": conn_id,
-                "dry_run": dry_run,
-                **context
-            }
+            read_alias = [r["index"] for r in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}")]
 
-        verified = verify.expand(context=fetch.expand(context=upstream))
-        eligible = select_eligible_for_fix(upstream=verified, stage=stage)
-        config = build_config.expand(context=eligible)
-        trigger = (
-            TriggerDagRunOperator.partial(
-                task_id=f"reconcile_aliases",
-                trigger_dag_id="reconcile_aliases_dag",
-                wait_for_completion=True,
+            write_alias = defaultdict(list)
+            for resp in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}-20*"):
+                write_alias[resp["alias"]].append((resp["index"], resp["is_write_index"]))
+
+            for monthly_alias in generate_write_aliases(
+                    context["tenant"], context["retention"]
+            ):
+                if monthly_alias not in write_alias:
+                    continue
+
+                if not any(is_write_index == "true" for _, is_write_index in write_alias.get(monthly_alias)):
+                    latest_index = write_alias.get(monthly_alias)[-1][0]
+                    actions.append({
+                        "add": {"index": latest_index, "alias": monthly_alias, "is_write_index": True}
+                    })
+
+                for index, _ in write_alias.get(monthly_alias):
+                    if not index in read_alias:
+                        actions.append({
+                            "add": {"index": index, "alias": tenant, "is_write_index": False}
+                        })
+
+            rollover = fetch_aliases(conn_id, f"/_cat/aliases/{tenant}-rollover")[-1]
+            if not rollover["is_write_index"] == "true":
+                actions.append({
+                    "add": {"index": f"seaas-{tenant}-*", "alias": f"{tenant}-rollover", "is_write_index": False}
+                })
+                actions.append({
+                    "add": {"index": rollover["index"], "alias": f"{tenant}-rollover", "is_write_index": True}
+                })
+
+            if actions and not dry_run:
+                response = http_hook_post(conn_id, "/_aliases/", json.dumps({"actions": actions}))
+                print(f"Response:\n{json.dumps(response, indent=2)}")
+
+            return success(
+                context=context,
+                stage=stage,
+                value=actions,
             )
-            .expand(conf=config)
-        )
-        t = wait_for_completion(upstream=verified)
-        trigger >> t
-        return t
+
+        @task
+        def report(contexts: List[Context]) -> None:
+            for i, c in enumerate(contexts):
+                if c["value"] and c["stage"] == stage:
+                    logging.info(f"{i}: {c['tenant']}\n{c['value']}")
+
+
+        r = reconcile.expand(context=upstream)
+        report(r)
+
+        return r
 
     t1 = fetch_indices_per_tenant()
     t2 = ilm_settings(upstream=t1)
