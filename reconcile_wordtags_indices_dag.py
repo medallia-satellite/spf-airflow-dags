@@ -365,12 +365,15 @@ def reconcile_wordtags_indices_dag():
             read_alias = [r["index"] for r in get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}")]
 
             write_alias = defaultdict(list)
-            for r in get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}-20*"):
-                write_alias[r["alias"]].append((r["index"], r["is_write_index"]))
+            for resp in get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}-20*"):
+                write_alias[resp["alias"]].append((resp["index"], resp["is_write_index"]))
 
             for monthly_alias in generate_write_aliases(
                     context["tenant"], context["retention"]
             ):
+                if monthly_alias not in write_alias:
+                    continue
+
                 if not any(is_write_index == "true" for _, is_write_index in write_alias.get(monthly_alias)):
                     latest_index = write_alias.get(monthly_alias)[-1][0]
                     actions.append({
