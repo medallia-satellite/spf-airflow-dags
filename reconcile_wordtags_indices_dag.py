@@ -279,7 +279,7 @@ def reconcile_wordtags_indices_dag():
                     response = create_index(index, payload, conn_id)
                     print(f"Response:\n{json.dumps(response, indent=2)}")
 
-            return success(context=context, stage=stage)
+            return success(context=context, stage=stage, value=missing)
 
         @task
         def report(contexts: List[Context]) -> None:
