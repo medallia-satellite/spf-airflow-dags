@@ -1,11 +1,10 @@
 import json
 import logging
 from collections import defaultdict
-from typing import List, Tuple
+from typing import List
 
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from fix_and_verify import (
     BASE_REGEX,
@@ -28,22 +27,6 @@ from utils import (
     select_eligible_for_fix, param_value, http_hook_put, http_hook_post,
 )
 
-
-def fetch_indices_in_alias(alias: str, conn_id: str) -> List[Tuple[str, str, bool]]:
-    results = http_hook_get(conn_id, f"/_cat/aliases/{alias}")
-    return [(i["index"], i["alias"], i["is_write_index"] == "true") for i in results]
-
-
-def fetch_indices(prefix: str, conn_id: str) -> List[str]:
-    results = http_hook_get(
-        conn_id,
-        f"/_cat/indices/{prefix}*",
-        params={
-            "h": "index",
-            "format": "json",
-        }
-    )
-    return [r["index"] for r in results]
 
 
 @dag(
@@ -230,13 +213,9 @@ def reconcile_wordtags_indices_dag():
         fixed >> t
         return t
 
-
     @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
         stage = "monthly_indices"
-
-        def create_index(index, payload, conn_id):
-            return http_hook_put(conn_id, index, json.dumps(payload))
 
         @task
         @chain_on_success
@@ -276,7 +255,7 @@ def reconcile_wordtags_indices_dag():
                     f"Creating index: {index} (dry-run={dry_run})\n{json.dumps(payload, indent=2)}"
                 )
                 if not dry_run:
-                    response = create_index(index, payload, conn_id)
+                    response = http_hook_put(conn_id, index, json.dumps(payload))
                     print(f"Response:\n{json.dumps(response, indent=2)}")
 
             return success(context=context, stage=stage, value=missing)
@@ -294,55 +273,8 @@ def reconcile_wordtags_indices_dag():
         return r
 
     @task_group
-    def monthly_indices_old(upstream: List[Context]) -> List[Context]:
-        stage = "monthly_indices"
-
-        @task
-        @chain_on_success
-        def verify(context: Context) -> Context:
-            indices = xcom_pull("fetch_indices_per_tenant", context["tenant"])
-            for write_alias in generate_write_aliases(
-                context["tenant"], context["retention"]
-            ):
-                if not any(
-                    index.startswith(f"seaas-{write_alias}") for index in indices
-                ):
-                    return failure(context=context, stage=stage)
-            return success(context=context, stage=stage)
-
-        @task
-        def build_config(context: Context) -> dict:
-            conn_id = param_value("conn_id")
-            dry_run = param_value("dry_run")
-
-            return {
-                "conn_id": conn_id,
-                "dry_run": dry_run,
-                **context
-            }
-
-        verified = verify.expand(context=upstream)
-        eligible = select_eligible_for_fix(upstream=verified, stage=stage)
-        config = build_config.expand(context=eligible)
-        trigger = (
-            TriggerDagRunOperator.partial(
-                task_id=f"reconcile_monthly_indices",
-                trigger_dag_id="reconcile_monthly_indices_dag",
-                wait_for_completion=True,
-            )
-            .expand(conf=config)
-        )
-
-        t = wait_for_completion(upstream=verified)
-        trigger >> t
-        return t
-
-    @task_group
     def aliases(upstream: Context) -> List[Context]:
-        def update_aliases(conn_id, actions):
-            return http_hook_post(conn_id, "/_aliases/", json.dumps({"actions": actions}))
-
-        def get_sorted_aliases(conn_id: str, endpoint: str):
+        def fetch_aliases(conn_id: str, endpoint: str):
             return http_hook_get(
                 conn_id,
                 endpoint,
@@ -352,6 +284,7 @@ def reconcile_wordtags_indices_dag():
                     "h": "alias,index,is_write_index"
                 },
             )
+
         stage = "aliases"
 
         @task
@@ -362,10 +295,10 @@ def reconcile_wordtags_indices_dag():
             tenant = context["tenant"]
             actions = []
 
-            read_alias = [r["index"] for r in get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}")]
+            read_alias = [r["index"] for r in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}")]
 
             write_alias = defaultdict(list)
-            for resp in get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}-20*"):
+            for resp in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}-20*"):
                 write_alias[resp["alias"]].append((resp["index"], resp["is_write_index"]))
 
             for monthly_alias in generate_write_aliases(
@@ -386,7 +319,7 @@ def reconcile_wordtags_indices_dag():
                             "add": {"index": index, "alias": tenant, "is_write_index": False}
                         })
 
-            rollover = get_sorted_aliases(conn_id, f"/_cat/aliases/{tenant}-rollover")[-1]
+            rollover = fetch_aliases(conn_id, f"/_cat/aliases/{tenant}-rollover")[-1]
             if not rollover["is_write_index"] == "true":
                 actions.append({
                     "add": {"index": f"seaas-{tenant}-*", "alias": f"{tenant}-rollover", "is_write_index": False}
@@ -396,7 +329,7 @@ def reconcile_wordtags_indices_dag():
                 })
 
             if actions and not dry_run:
-                response = update_aliases(conn_id, actions=actions)
+                response = http_hook_post(conn_id, "/_aliases/", json.dumps({"actions": actions}))
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
             return success(
