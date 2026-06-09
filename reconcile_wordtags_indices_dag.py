@@ -107,13 +107,6 @@ def reconcile_wordtags_indices_dag():
                 if (s := xcom_pull("ilm_settings.fetch", index))
             ]
 
-            if len(indices) != len(il_list):
-                return failure(
-                    context=context,
-                    stage=stage,
-                    error="Some indices are missing ILM settings",
-                )
-
             policies = [il.get("name") for il in il_list]
             rollover = [il.get("rollover_alias") for il in il_list if il.get("rollover_alias")]
 
@@ -132,6 +125,13 @@ def reconcile_wordtags_indices_dag():
                     context=context,
                     stage=stage,
                     error=f"Invalid rollover alias {rollover}",
+                )
+
+            if len(indices) != len(il_list):
+                return failure(
+                    context=context,
+                    stage=stage,
+                    error="Some indices are missing ILM settings",
                 )
 
             context.update({"retention": POLICY_MAPPING[policies[0]]})
