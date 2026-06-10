@@ -133,7 +133,7 @@ def is_past_retention_limit(iso_date_str: str, retention_months: int) -> bool:
 
 def generate_write_aliases(tenant, retention_months):
     current_month_start = (
-        (datetime.datetime.today() - relativedelta(months=retention_months - 1))
+        (datetime.datetime.today() - relativedelta(months=retention_months))
         .replace(day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc)
     )
     return [
