@@ -220,7 +220,7 @@ def reconcile_wordtags_indices_dag():
     def monthly_indices(upstream: List[Context]) -> List[Context]:
         stage = "monthly_indices"
 
-        @task
+        @task(retries=2)
         @chain_on_success
         def reconcile(context: Context) -> Context:
             conn_id = param_value("conn_id")
@@ -290,7 +290,7 @@ def reconcile_wordtags_indices_dag():
 
         stage = "aliases"
 
-        @task
+        @task(retries=2)
         @chain_on_success
         def reconcile(context: Context) -> Context:
             dry_run = param_value("dry_run")
