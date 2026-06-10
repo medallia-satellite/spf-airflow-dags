@@ -148,11 +148,14 @@ def reconcile_wordtags_indices_dag():
         @task
         def fetch(data: List[Context]) -> List[Context]:
             conn_id = param_value("conn_id")
-
+            non_seaas_templates = []
             results = http_hook_get(conn_id, "/_index_template/*-rollover")
             for r in results["index_templates"]:
                 if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
                     xcom_push(r["name"], r["index_template"])
+                else:
+                    non_seaas_templates.append(r["name"])
+            logging.warning("Non-seaas templates: %s", non_seaas_templates)
             return data
 
         @task
@@ -217,7 +220,7 @@ def reconcile_wordtags_indices_dag():
     def monthly_indices(upstream: List[Context]) -> List[Context]:
         stage = "monthly_indices"
 
-        @task
+        @task(retries=2)
         @chain_on_success
         def reconcile(context: Context) -> Context:
             conn_id = param_value("conn_id")
@@ -287,7 +290,7 @@ def reconcile_wordtags_indices_dag():
 
         stage = "aliases"
 
-        @task
+        @task(retries=2)
         @chain_on_success
         def reconcile(context: Context) -> Context:
             dry_run = param_value("dry_run")
