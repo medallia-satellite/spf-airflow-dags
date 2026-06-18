@@ -59,7 +59,7 @@ def testing_dag():
         results = http_hook_get(
             param_value("conn_id"),
             "/_settings/index.lifecycle.name",
-            params={"flat_settings": True},
+            params={"flat_settings": "true"},
         )
         logging.info(f"Fetched {len(results)} records")
         oldest_index = min(results)
