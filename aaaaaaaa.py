@@ -9,7 +9,7 @@ from fix_and_verify import (
     BASE_REGEX,
     POLICY_MAPPING,
     extract_index_details,
-    index_has_expired, ALIAS_REGEX_MAPPING,
+    index_has_expired, ALIAS_REGEX_MAPPING, INDEX_REGEX,
 )
 from utils import (
     http_hook_get,
@@ -90,7 +90,14 @@ def testing_dag():
                 "format": "json",
             },
         )
-        indices = [r["index"] for r in results]
+        indices = [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
+        if not indices:
+            return failure(
+                context=context,
+                stage=stage,
+                error=f"No indices found for '{context['tenant']}'",
+            )
+
         expired = []
         for index in indices:
             if index_has_expired(index, context["retention"]):
