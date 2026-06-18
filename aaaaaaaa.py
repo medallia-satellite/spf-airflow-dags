@@ -129,7 +129,7 @@ def testing_dag():
             if c["value"]:
                 logging.info(f"{i}: {c['tenant']}\n{c['value']}")
             elif not c["success"]:
-                logging.error(f"{i}: {c['tenant']}\n{c['error']}")
+                logging.error(f"{i}: {c['tenant']} - {c['error']}")
 
     report(
         expired_indices.expand(context=fetch_retention.expand(context=fetch_tenants()))
