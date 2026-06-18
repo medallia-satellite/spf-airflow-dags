@@ -127,7 +127,7 @@ def testing_dag():
         for i, c in enumerate(contexts):
             if c["value"]:
                 logging.info(f"{i}: {c['tenant']}\n{c['value']}")
-            if not c["success"]:
+            elif not c["success"]:
                 logging.error(f"{i}: {c['tenant']}\n{c['error']}")
 
     report(
