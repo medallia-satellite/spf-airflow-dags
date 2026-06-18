@@ -11,7 +11,7 @@ INDEX_PATTERN = (
 )
 INDEX_REGEX = re.compile(INDEX_PATTERN)
 ALIAS_REGEX_MAPPING = {
-    "read": re.compile(rf"{BASE_PATTERN}"),
+    "read": re.compile(rf"{BASE_PATTERN}$"),
     "write": re.compile(rf"{BASE_PATTERN}" + r"-[0-9]{4}-[0-9]{2}-[0-9]{2}"),
     "rollover": re.compile(rf"{BASE_PATTERN}-rollover"),
 }

@@ -9,7 +9,7 @@ from fix_and_verify import (
     BASE_REGEX,
     POLICY_MAPPING,
     extract_index_details,
-    index_has_expired,
+    index_has_expired, ALIAS_REGEX_MAPPING,
 )
 from utils import (
     http_hook_get,
@@ -50,7 +50,7 @@ def testing_dag():
         return [
             Context(success=True, tenant=alias)
             for alias in set(
-                r["alias"] for r in fetched if BASE_REGEX.match(r["alias"])
+                r["alias"] for r in fetched if ALIAS_REGEX_MAPPING["read"].match(r["alias"])
             )
         ]
 
