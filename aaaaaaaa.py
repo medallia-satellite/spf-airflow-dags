@@ -88,13 +88,15 @@ def testing_dag():
                 "s": "index",
                 "h": "index",
                 "format": "json",
-            }
+            },
         )
         indices = [r["index"] for r in results]
         expired = []
         for index in indices:
             if index_has_expired(index, context["retention"]):
-                logging.info(f"Marking indexing as completed (dry-run={param_value('dry_run')}): {index}")
+                logging.info(
+                    f"Marking indexing as completed (dry-run={param_value('dry_run')}): {index}"
+                )
                 expired.append(index)
 
                 if param_value("dry_run"):
@@ -119,6 +121,9 @@ def testing_dag():
             if c["value"]:
                 logging.info(f"{i}: {c['tenant']}\n{c['value']}")
 
-    report(expired_indices.expand(context=fetch_retention.expand(context=fetch_retention)))
+    report(
+        expired_indices.expand(context=fetch_retention.expand(context=fetch_retention))
+    )
+
 
 testing_dag()
