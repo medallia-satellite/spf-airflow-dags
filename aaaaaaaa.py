@@ -122,7 +122,7 @@ def testing_dag():
                 logging.info(f"{i}: {c['tenant']}\n{c['value']}")
 
     report(
-        expired_indices.expand(context=fetch_retention.expand(context=fetch_retention))
+        expired_indices.expand(context=fetch_retention.expand(context=fetch_retention()))
     )
 
 
