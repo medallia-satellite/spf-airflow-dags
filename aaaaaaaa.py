@@ -17,7 +17,7 @@ from utils import (
     Context,
     success,
     failure,
-    param_value,
+    param_value, chain_on_success,
 )
 
 
@@ -77,6 +77,7 @@ def testing_dag():
         )
 
     @task
+    @chain_on_success
     def expired_indices(context: Context) -> Context:
         stage = "expired_indices"
         conn_id = param_value("conn_id")
