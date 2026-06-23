@@ -61,7 +61,9 @@ def es_index_metadata_fix():
                 continue
             settings = r["settings"]
             origination_date_in_ns = int(
-                settings.get("index.lifecycle.origination_date", settings["index.creation_date"])
+                settings.get(
+                    "index.lifecycle.origination_date", settings["index.creation_date"]
+                )
             )
 
             origination_date = datetime.datetime.fromtimestamp(
@@ -71,7 +73,9 @@ def es_index_metadata_fix():
             index_date_str = extract_index_details(index)["month"]
             index_date = datetime.date.fromisoformat(index_date_str)
             if origination_date != index_date:
-                logging.info(f"{index}: should be {index_date} instead of {origination_date} ({settings}).")
+                logging.info(
+                    f"{index}: should be {index_date} instead of {origination_date} ({settings})."
+                )
                 to_fix[index_date_str].append(index)
 
         # create alias
@@ -87,7 +91,9 @@ def es_index_metadata_fix():
                         }
                     }
                 )
-        logging.info(f"Adding temporal aliases to update (dry-run={param_value('dry_run')}): {actions}")
+        logging.info(
+            f"Adding temporal aliases to update (dry-run={param_value('dry_run')}): {actions}"
+        )
 
         if actions and not dry_run:
             response = http_hook_post(
@@ -96,7 +102,9 @@ def es_index_metadata_fix():
             logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
         # update config
-        logging.info(f"Updating origination_date (dry-run={param_value('dry_run')}): {to_fix.keys()}")
+        logging.info(
+            f"Updating origination_date (dry-run={param_value('dry_run')}): {to_fix.keys()}"
+        )
         for year_month in to_fix.keys():
             origination_date = int(
                 datetime.datetime.fromisoformat(year_month)
@@ -117,7 +125,9 @@ def es_index_metadata_fix():
             for year_month in to_fix.keys()
         ]
 
-        logging.info(f"Removing temporal aliases (dry-run={param_value('dry_run')}): {actions}")
+        logging.info(
+            f"Removing temporal aliases (dry-run={param_value('dry_run')}): {actions}"
+        )
 
         if actions and not dry_run:
             response = http_hook_post(
