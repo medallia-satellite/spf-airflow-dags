@@ -1,17 +1,19 @@
 import datetime
 import json
 import logging
+from collections import defaultdict
 from typing import List
 
 from airflow.decorators import dag, task
 from airflow.models import Param
-from black.trans import defaultdict
 
 from fix_and_verify import (
     BASE_REGEX,
     POLICY_MAPPING,
     extract_index_details,
-    index_has_expired, ALIAS_REGEX_MAPPING, INDEX_REGEX,
+    index_has_expired,
+    ALIAS_REGEX_MAPPING,
+    INDEX_REGEX,
 )
 from utils import (
     http_hook_get,
@@ -19,7 +21,9 @@ from utils import (
     Context,
     success,
     failure,
-    param_value, chain_on_success, http_hook_post,
+    param_value,
+    chain_on_success,
+    http_hook_post,
 )
 
 
@@ -56,8 +60,12 @@ def es_index_metadata_fix():
             if not INDEX_REGEX.match(index):
                 continue
             settings = r["settings"]
-            origination_date_in_ns = int(settings.get("origination_date", settings["creation_date"]))
-            origination_date = datetime.date.fromtimestamp(origination_date_in_ns * 1e-3)
+            origination_date_in_ns = int(
+                settings.get("origination_date", settings["creation_date"])
+            )
+            origination_date = datetime.date.fromtimestamp(
+                origination_date_in_ns * 1e-3
+            )
 
             index_date = extract_index_details(index)["month"]
             if origination_date != datetime.date.fromisoformat(index_date):
@@ -67,14 +75,21 @@ def es_index_metadata_fix():
         actions = []
         for year_month, indices in to_fix.items():
             for index in indices:
-                actions.append({
-                    "add": {"index": index, "alias": f"temp-{year_month}", "is_write_index": False}
-                })
+                actions.append(
+                    {
+                        "add": {
+                            "index": index,
+                            "alias": f"temp-{year_month}",
+                            "is_write_index": False,
+                        }
+                    }
+                )
 
         if actions and not dry_run:
-            response = http_hook_post(conn_id, "/_aliases/", json.dumps({"actions": actions}))
+            response = http_hook_post(
+                conn_id, "/_aliases/", json.dumps({"actions": actions})
+            )
             logging.info(f"Response:\n{json.dumps(response, indent=2)}")
-
 
         # update config
         for year_month in to_fix.keys():
@@ -88,16 +103,19 @@ def es_index_metadata_fix():
                 response = update_index_settings(
                     param_value("conn_id"),
                     f"temp-{year_month}",
-                    {
-                        "index.lifecycle.origination_date": origination_date
-                    },
+                    {"index.lifecycle.origination_date": origination_date},
                 )
                 logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
-        actions = [{"remove": {"index": "*", "alias": f"temp-{year_month}"}} for year_month in to_fix.keys()]
+        actions = [
+            {"remove": {"index": "*", "alias": f"temp-{year_month}"}}
+            for year_month in to_fix.keys()
+        ]
 
         if actions and not dry_run:
-            response = http_hook_post(conn_id, "/_aliases/", json.dumps({"actions": actions}))
+            response = http_hook_post(
+                conn_id, "/_aliases/", json.dumps({"actions": actions})
+            )
             logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
     @task
@@ -111,7 +129,9 @@ def es_index_metadata_fix():
         return [
             Context(success=True, tenant=alias)
             for alias in set(
-                r["alias"] for r in fetched if ALIAS_REGEX_MAPPING["read"].match(r["alias"])
+                r["alias"]
+                for r in fetched
+                if ALIAS_REGEX_MAPPING["read"].match(r["alias"])
             )
         ]
 
