@@ -78,7 +78,6 @@ def es_index_metadata_fix():
                 )
                 to_fix[index_date_str].append(index)
 
-        # create alias
         actions = []
         for year_month, indices in to_fix.items():
             for index in indices:
@@ -101,16 +100,15 @@ def es_index_metadata_fix():
             )
             logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
-        # update config
-        logging.info(
-            f"Updating origination_date (dry-run={param_value('dry_run')}): {to_fix.keys()}"
-        )
         for year_month in to_fix.keys():
             origination_date = int(
                 datetime.datetime.fromisoformat(year_month)
                 .replace(tzinfo=datetime.timezone.utc)
                 .timestamp()
                 * 1e3
+            )
+            logging.info(
+                f"Updating origination_date in alias 'temp-{year_month}' (dry-run={param_value('dry_run')}): {to_fix.keys()}"
             )
             if not param_value("dry_run"):
                 response = update_index_settings(
