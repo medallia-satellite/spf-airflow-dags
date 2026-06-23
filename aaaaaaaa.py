@@ -63,14 +63,15 @@ def es_index_metadata_fix():
             origination_date_in_ns = int(
                 settings.get("index.lifecycle.origination_date", settings["index.creation_date"])
             )
-            origination_date = datetime.date.fromtimestamp(
-                origination_date_in_ns * 1e-3
-            )
+
+            origination_date = datetime.datetime.fromtimestamp(
+                origination_date_in_ns * 1e-3, tz=datetime.timezone.utc
+            ).date()
 
             index_date_str = extract_index_details(index)["month"]
             index_date = datetime.date.fromisoformat(index_date_str)
             if origination_date != index_date:
-                logging.info(f"{index}: {settings} (should be {index_date} instead of {origination_date})")
+                logging.info(f"{index}: should be {index_date} instead of {origination_date} ({settings}).")
                 to_fix[index_date_str].append(index)
 
         # create alias
