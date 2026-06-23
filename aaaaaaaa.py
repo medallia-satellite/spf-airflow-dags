@@ -67,9 +67,11 @@ def es_index_metadata_fix():
                 origination_date_in_ns * 1e-3
             )
 
-            index_date = extract_index_details(index)["month"]
-            if origination_date != datetime.date.fromisoformat(index_date):
-                to_fix[index_date].append(index)
+            index_date_str = extract_index_details(index)["month"]
+            index_date = datetime.date.fromisoformat(index_date_str)
+            if origination_date != index_date:
+                logging.info(f"{index}: {settings} (should be {index_date} - {index_date_str})")
+                to_fix[index_date_str].append(index)
 
         # create alias
         actions = []
