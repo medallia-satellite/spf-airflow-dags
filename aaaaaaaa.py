@@ -118,6 +118,8 @@ def es_index_metadata_fix():
             )
             logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
+        return to_fix
+
     @task
     def fetch_tenants() -> List[Context]:
         fetched = http_hook_get(
