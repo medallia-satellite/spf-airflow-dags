@@ -61,7 +61,7 @@ def es_index_metadata_fix():
                 continue
             settings = r["settings"]
             origination_date_in_ns = int(
-                settings.get("origination_date", settings["creation_date"])
+                settings.get("index.lifecycle.origination_date", settings["index.creation_date"])
             )
             origination_date = datetime.date.fromtimestamp(
                 origination_date_in_ns * 1e-3
