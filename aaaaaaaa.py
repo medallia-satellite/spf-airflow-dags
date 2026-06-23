@@ -84,6 +84,7 @@ def es_index_metadata_fix():
                         }
                     }
                 )
+        logging.info(f"Adding temporal aliases to update (dry-run={param_value('dry_run')}): {actions}")
 
         if actions and not dry_run:
             response = http_hook_post(
@@ -92,6 +93,7 @@ def es_index_metadata_fix():
             logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
         # update config
+        logging.info(f"Updating origination_date (dry-run={param_value('dry_run')}): {to_fix.keys()}")
         for year_month in to_fix.keys():
             origination_date = int(
                 datetime.datetime.fromisoformat(year_month)
@@ -111,6 +113,8 @@ def es_index_metadata_fix():
             {"remove": {"index": "*", "alias": f"temp-{year_month}"}}
             for year_month in to_fix.keys()
         ]
+
+        logging.info(f"Removing temporal aliases (dry-run={param_value('dry_run')}): {actions}")
 
         if actions and not dry_run:
             response = http_hook_post(
