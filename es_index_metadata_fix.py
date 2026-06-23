@@ -46,7 +46,7 @@ def update_index_settings(conn_id: str, index, payload):
 )
 def es_index_metadata_fix():
     @task
-    def aaaa():
+    def reconcile_origination_dates():
         dry_run = param_value("dry_run")
         conn_id = param_value("conn_id")
 
@@ -55,19 +55,19 @@ def es_index_metadata_fix():
             "/_all/_settings/index.lifecycle.origination_date,index.creation_date",
             params={"flat_settings": "true"},
         )
-        to_fix = defaultdict(list)
+        mismatched_indices_by_month = defaultdict(list)
         for index, r in fetched.items():
             if not INDEX_REGEX.match(index):
                 continue
             settings = r["settings"]
-            origination_date_in_ns = int(
+            origination_date_ms = int(
                 settings.get(
                     "index.lifecycle.origination_date", settings["index.creation_date"]
                 )
             )
 
             origination_date = datetime.datetime.fromtimestamp(
-                origination_date_in_ns * 1e-3, tz=datetime.timezone.utc
+                origination_date_ms * 1e-3, tz=datetime.timezone.utc
             ).date()
 
             index_date_str = extract_index_details(index)["month"]
@@ -76,12 +76,12 @@ def es_index_metadata_fix():
                 logging.info(
                     f"{index}: should be {index_date} instead of {origination_date} ({settings})."
                 )
-                to_fix[index_date_str].append(index)
+                mismatched_indices_by_month[index_date_str].append(index)
 
-        actions = []
-        for year_month, indices in to_fix.items():
+        add_alias_actions = []
+        for year_month, indices in mismatched_indices_by_month.items():
             for index in indices:
-                actions.append(
+                add_alias_actions.append(
                     {
                         "add": {
                             "index": index,
@@ -91,16 +91,16 @@ def es_index_metadata_fix():
                     }
                 )
         logging.info(
-            f"Adding temporal aliases to update (dry-run={param_value('dry_run')}): {actions}"
+            f"Adding temporal aliases to update (dry-run={dry_run}): {add_alias_actions}"
         )
 
-        if actions and not dry_run:
+        if add_alias_actions and not dry_run:
             response = http_hook_post(
-                conn_id, "/_aliases/", json.dumps({"actions": actions})
+                conn_id, "/_aliases/", json.dumps({"actions": add_alias_actions})
             )
             logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
-        for year_month in to_fix.keys():
+        for year_month in mismatched_indices_by_month.keys():
             origination_date = int(
                 datetime.datetime.fromisoformat(year_month)
                 .replace(tzinfo=datetime.timezone.utc)
@@ -108,7 +108,7 @@ def es_index_metadata_fix():
                 * 1e3
             )
             logging.info(
-                f"Updating origination_date in alias 'temp-{year_month}' (dry-run={param_value('dry_run')}): {to_fix.keys()}"
+                f"Updating origination_date in alias 'temp-{year_month}' (dry-run={dry_run}): {mismatched_indices_by_month.keys()}"
             )
             if not param_value("dry_run"):
                 response = update_index_settings(
@@ -118,22 +118,22 @@ def es_index_metadata_fix():
                 )
                 logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
-        actions = [
+        remove_alias_actions = [
             {"remove": {"index": "*", "alias": f"temp-{year_month}"}}
-            for year_month in to_fix.keys()
+            for year_month in mismatched_indices_by_month.keys()
         ]
 
         logging.info(
-            f"Removing temporal aliases (dry-run={param_value('dry_run')}): {actions}"
+            f"Removing temporal aliases (dry-run={dry_run}): {remove_alias_actions}"
         )
 
-        if actions and not dry_run:
+        if remove_alias_actions and not dry_run:
             response = http_hook_post(
-                conn_id, "/_aliases/", json.dumps({"actions": actions})
+                conn_id, "/_aliases/", json.dumps({"actions": remove_alias_actions})
             )
             logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
-        return to_fix
+        return mismatched_indices_by_month
 
     @task
     def fetch_tenants() -> List[Context]:
@@ -232,7 +232,7 @@ def es_index_metadata_fix():
     report(
         expired_indices.expand(context=fetch_retention.expand(context=fetch_tenants()))
     )
-    aaaa()
+    reconcile_origination_dates()
 
 
 es_index_metadata_fix()
