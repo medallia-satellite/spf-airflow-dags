@@ -159,7 +159,7 @@ def es_index_lifecycle_metadata_fix():
                 logging.error(f"{tenant} - Invalid retention policy: {policy_name}")
                 continue
 
-            retention[tenant] = policy_name
+            retention[tenant] = POLICY_MAPPING[policy_name]
 
         return Context(success=True, value=retention)
 
