@@ -34,6 +34,7 @@ def update_index_settings(index, payload, conn_id: str, dry_run: bool):
         response = http_hook_put(conn_id, f"{index}/_settings", json.dumps(payload))
         logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
+
 def apply_alias_actions(actions: list[dict], conn_id: str, dry_run: bool):
     logging.info(
         f"Applying alias updates (dry-run={dry_run}): \n{json.dumps(actions, indent=2)}"
@@ -44,6 +45,7 @@ def apply_alias_actions(actions: list[dict], conn_id: str, dry_run: bool):
             conn_id, "/_aliases/", json.dumps({"actions": actions})
         )
         logging.info(f"Response:\n{json.dumps(response, indent=2)}")
+
 
 @dag(
     dag_display_name="Elasticsearch ILM Metadata Fix",
@@ -59,7 +61,6 @@ def apply_alias_actions(actions: list[dict], conn_id: str, dry_run: bool):
     render_template_as_native_obj=True,
 )
 def es_index_lifecycle_metadata_fix():
-
 
     @task
     def reconcile_origination_dates():
@@ -101,26 +102,30 @@ def es_index_lifecycle_metadata_fix():
                     {
                         "add": {
                             "index": index,
-                            "alias": f"temp-{index_date_str}",
+                            "alias": f"temp-reconcile_origination_dates-{index_date_str}",
                             "is_write_index": False,
                         }
                     }
                 )
         apply_alias_actions(add_alias_actions, conn_id, dry_run)
 
-        for year_month in mismatched_indices_by_month.keys():
+        for index_date_str in mismatched_indices_by_month.keys():
             origination_date = int(
-                datetime.datetime.fromisoformat(year_month)
+                datetime.datetime.fromisoformat(index_date_str)
                 .replace(tzinfo=datetime.timezone.utc)
                 .timestamp()
                 * 1e3
             )
 
-            update_index_settings(f"temp-{year_month}", {"index.lifecycle.origination_date": origination_date},
-                                  conn_id, dry_run)
+            update_index_settings(
+                f"temp-reconcile_origination_dates-{index_date_str}",
+                {"index.lifecycle.origination_date": origination_date},
+                conn_id,
+                dry_run,
+            )
 
         remove_alias_actions = [
-            {"remove": {"index": "*", "alias": f"temp-{year_month}"}}
+            {"remove": {"index": "*", "alias": f"temp-reconcile_origination_dates-{year_month}"}}
             for year_month in mismatched_indices_by_month.keys()
         ]
 
@@ -128,6 +133,35 @@ def es_index_lifecycle_metadata_fix():
 
         return mismatched_indices_by_month
 
+    @task
+    def expire_indices():
+        fetched = http_hook_get(
+            param_value("conn_id"),
+            "/_cat/aliases",
+            params={"h": "alias", "s": "alias", "format": "json"},
+        )
+        tenants = set(
+            r["alias"]
+            for r in fetched
+            if ALIAS_REGEX_MAPPING["read"].match(r["alias"])
+        )
+        retention = {}
+        for tenant in tenants:
+            results = http_hook_get(
+                param_value("conn_id"),
+                f"/{tenant}/_settings/index.lifecycle.name",
+                params={"flat_settings": "true"},
+            )
+            logging.info(f"Fetched {len(results)} records")
+            oldest_index = min(results)
+            policy_name = results[oldest_index]["settings"]["index.lifecycle.name"]
+            if policy_name not in POLICY_MAPPING:
+                logging.error(f"{tenant} - Invalid retention policy: {policy_name}")
+                continue
+
+            retention[tenant] = policy_name
+
+        return Context(success=True, value=retention)
 
     @task
     def fetch_tenants() -> List[Context]:
@@ -193,22 +227,29 @@ def es_index_lifecycle_metadata_fix():
                 error=f"No indices found for '{context['tenant']}'",
             )
 
-        expired = [index for index in indices if index_has_expired(index, context["retention"])]
+        expired = [
+            index for index in indices if index_has_expired(index, context["retention"])
+        ]
 
-        add_alias_actions = [{
-                    "add": {
-                        "index": index,
-                        "alias": f"temp-expired-{context['tenant']}",
-                        "is_write_index": False,
-                    }
-                } for index in expired]
+        add_alias_actions = [
+            {
+                "add": {
+                    "index": index,
+                    "alias": f"temp-expired-{context['tenant']}",
+                    "is_write_index": False,
+                }
+            }
+            for index in expired
+        ]
 
         apply_alias_actions(add_alias_actions, conn_id, dry_run)
 
-
-        update_index_settings(f"temp-expired-{context['tenant']}",
-                              {"index.lifecycle.indexing_complete": True},
-                              conn_id, dry_run)
+        update_index_settings(
+            f"temp-expired-{context['tenant']}",
+            {"index.lifecycle.indexing_complete": True},
+            conn_id,
+            dry_run,
+        )
 
         remove_alias_actions = [
             {"remove": {"index": "*", "alias": f"temp-expired-{context['tenant']}"}}
@@ -227,7 +268,10 @@ def es_index_lifecycle_metadata_fix():
                 logging.error(f"{i}: {c['tenant']} - {c['error']}")
 
     reconcile_origination_dates()
-    report(expired_indices.expand(context=fetch_retention.expand(context=fetch_tenants())))
+    expire_indices()
+    report(
+        expired_indices.expand(context=fetch_retention.expand(context=fetch_tenants()))
+    )
 
 
 es_index_lifecycle_metadata_fix()
