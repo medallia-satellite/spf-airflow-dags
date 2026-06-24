@@ -12,7 +12,8 @@ from fix_and_verify import (
     extract_index_details,
     index_has_expired,
     ALIAS_REGEX_MAPPING,
-    INDEX_REGEX, BASE_REGEX,
+    INDEX_REGEX,
+    BASE_REGEX,
 )
 from utils import (
     http_hook_get,
@@ -125,7 +126,12 @@ def es_index_lifecycle_metadata_fix():
             )
 
         remove_alias_actions = [
-            {"remove": {"index": "*", "alias": f"temp-reconcile_origination_dates-{year_month}"}}
+            {
+                "remove": {
+                    "index": "*",
+                    "alias": f"temp-reconcile_origination_dates-{year_month}",
+                }
+            }
             for year_month in mismatched_indices_by_month.keys()
         ]
 
@@ -144,9 +150,7 @@ def es_index_lifecycle_metadata_fix():
             params={"h": "alias", "s": "alias", "format": "json"},
         )
         tenants = set(
-            r["alias"]
-            for r in fetched
-            if ALIAS_REGEX_MAPPING["read"].match(r["alias"])
+            r["alias"] for r in fetched if ALIAS_REGEX_MAPPING["read"].match(r["alias"])
         )
         retention = {}
         for tenant in tenants:
@@ -177,9 +181,26 @@ def es_index_lifecycle_metadata_fix():
                 "format": "json",
             },
         )
+
         indices = [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
+
+        results = http_hook_get(
+            conn_id,
+            f"/_all/_settings/index.lifecycle.indexing_complete",
+            params={"flat_settings": "true"},
+        )
+
+        already_marked = [
+            index
+            for index, details in results.items()
+            if details["index.lifecycle.indexing_complete"] == "true"
+        ]
+
         expired = [
-            index for index in indices if index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
+            index
+            for index in indices
+            if index not in already_marked
+            or index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
         ]
 
         add_alias_actions = [
