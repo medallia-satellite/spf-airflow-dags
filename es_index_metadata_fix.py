@@ -159,7 +159,7 @@ def es_index_lifecycle_metadata_fix():
                 logging.error(f"{tenant} - No indices found.")
                 continue
 
-            logging.info(f"Fetched {len(results)} indices.")
+            logging.info(f"{tenant} - Fetched {len(results)} indices.")
 
             policy_name = results[min(results)]["settings"]["index.lifecycle.name"]
             if policy_name not in POLICY_MAPPING:
