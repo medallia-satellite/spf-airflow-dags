@@ -216,14 +216,14 @@ def es_index_lifecycle_metadata_fix():
 
         apply_alias_actions(add_alias_actions, conn_id, dry_run)
 
-        update_index_settings(
-            f"temp-expire_indices",
-            {"index.lifecycle.indexing_complete": True},
-            conn_id,
-            dry_run,
-        )
-
         if add_alias_actions:
+            update_index_settings(
+                f"temp-expire_indices",
+                {"index.lifecycle.indexing_complete": True},
+                conn_id,
+                dry_run,
+            )
+
             remove_alias_actions = [
                 {"remove": {"index": "*", "alias": f"temp-expire_indices"}}
             ]
