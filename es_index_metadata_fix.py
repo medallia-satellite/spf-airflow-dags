@@ -193,7 +193,7 @@ def es_index_lifecycle_metadata_fix():
         already_marked = [
             index
             for index, details in results.items()
-            if details["index.lifecycle.indexing_complete"] == "true"
+            if details["settings"]["index.lifecycle.indexing_complete"] == "true"
         ]
 
         expired = [
