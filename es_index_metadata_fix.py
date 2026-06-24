@@ -107,7 +107,7 @@ def es_index_lifecycle_metadata_fix():
                 * 1e3
             )
             logging.info(
-                f"Updating origination_date in alias 'temp-{year_month}' (dry-run={dry_run}): {mismatched_indices_by_month.keys()}"
+                f"Updating origination_date in alias 'temp-{year_month}' (dry-run={dry_run}): {mismatched_indices_by_month.get(year_month)} to {origination_date}"
             )
             if not dry_run:
                 response = update_index_settings(
@@ -233,5 +233,6 @@ def es_index_lifecycle_metadata_fix():
     t2 = report(
         expired_indices.expand(context=fetch_retention.expand(context=fetch_tenants()))
     )
+
 
 es_index_lifecycle_metadata_fix()
