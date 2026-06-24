@@ -163,14 +163,14 @@ def es_index_lifecycle_metadata_fix():
                 logging.error(f"{tenant} - No indices found.")
                 continue
 
-            logging.info(f"{tenant} - Fetched {len(results)} indices.")
-
             policy_name = results[min(results)]["settings"]["index.lifecycle.name"]
             if policy_name not in POLICY_MAPPING:
                 logging.error(f"{tenant} - Invalid retention policy: {policy_name}")
                 continue
 
+
             retention[tenant] = POLICY_MAPPING[policy_name]
+            logging.info(f"{tenant} - {len(results)} indices found, retention policy {retention[tenant]}")
 
         results = http_hook_get(
             conn_id,
