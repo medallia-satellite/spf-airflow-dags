@@ -8,7 +8,6 @@ from airflow.decorators import dag, task
 from airflow.models import Param
 
 from fix_and_verify import (
-    BASE_REGEX,
     POLICY_MAPPING,
     extract_index_details,
     index_has_expired,
@@ -32,9 +31,9 @@ def update_index_settings(conn_id: str, index, payload):
 
 
 @dag(
-    dag_display_name="Awesome display name",
+    dag_display_name="Elasticsearch ILM Metadata Fix",
     tags=["spf", "elasticsearch"],
-    description="This is an awesome description for this dat",
+    description="Fixes ILM origination-date metadata and finalizes expired indices in Elasticsearch.",
     max_active_runs=1,
     schedule=None,
     catchup=False,
@@ -44,7 +43,7 @@ def update_index_settings(conn_id: str, index, payload):
     },
     render_template_as_native_obj=True,
 )
-def es_index_metadata_fix():
+def es_index_lifecycle_metadata_fix():
     @task
     def reconcile_origination_dates():
         dry_run = param_value("dry_run")
@@ -110,7 +109,7 @@ def es_index_metadata_fix():
             logging.info(
                 f"Updating origination_date in alias 'temp-{year_month}' (dry-run={dry_run}): {mismatched_indices_by_month.keys()}"
             )
-            if not param_value("dry_run"):
+            if not dry_run:
                 response = update_index_settings(
                     param_value("conn_id"),
                     f"temp-{year_month}",
@@ -168,6 +167,7 @@ def es_index_metadata_fix():
                 stage="fetch_retention",
                 error=f"Invalid retention policy: '{policy_name}'",
             )
+
         return Context(
             success=True,
             tenant=context["tenant"],
@@ -222,17 +222,18 @@ def es_index_metadata_fix():
         return success(context=context, stage=stage, value=expired)
 
     @task
-    def report(contexts: List[Context]) -> None:
+    def report(contexts: List[Context]):
         for i, c in enumerate(contexts):
             if c["value"]:
                 logging.info(f"{i}: {c['tenant']}\n{c['value']}")
             elif not c["success"]:
                 logging.error(f"{i}: {c['tenant']} - {c['error']}")
 
-    report(
+
+    t1 = reconcile_origination_dates()
+    t2 = report(
         expired_indices.expand(context=fetch_retention.expand(context=fetch_tenants()))
     )
-    reconcile_origination_dates()
+    t1 > t2
 
-
-es_index_metadata_fix()
+es_index_lifecycle_metadata_fix()
