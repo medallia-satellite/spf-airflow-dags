@@ -78,19 +78,19 @@ def es_index_lifecycle_metadata_fix():
                 mismatched_indices_by_month[index_date_str].append(index)
 
         add_alias_actions = []
-        for year_month, indices in mismatched_indices_by_month.items():
+        for index_date_str, indices in mismatched_indices_by_month.items():
             for index in indices:
                 add_alias_actions.append(
                     {
                         "add": {
                             "index": index,
-                            "alias": f"temp-{year_month}",
+                            "alias": f"temp-{index_date_str}",
                             "is_write_index": False,
                         }
                     }
                 )
         logging.info(
-            f"Adding temporal aliases to update (dry-run={dry_run}): {add_alias_actions}"
+            f"Adding temporal aliases to update (dry-run={dry_run}): \n{json.dumps(add_alias_actions, indent=2)}"
         )
 
         if add_alias_actions and not dry_run:
@@ -123,7 +123,7 @@ def es_index_lifecycle_metadata_fix():
         ]
 
         logging.info(
-            f"Removing temporal aliases (dry-run={dry_run}): {remove_alias_actions}"
+            f"Removing temporal aliases (dry-run={dry_run}): \n{json.dumps(remove_alias_actions, indent=2)}"
         )
 
         if remove_alias_actions and not dry_run:
