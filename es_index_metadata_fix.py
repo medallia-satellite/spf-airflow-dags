@@ -2,7 +2,6 @@ import datetime
 import json
 import logging
 from collections import defaultdict
-from typing import List
 
 from airflow.decorators import dag, task
 from airflow.models import Param
@@ -18,7 +17,6 @@ from fix_and_verify import (
 from utils import (
     http_hook_get,
     http_hook_put,
-    Context,
     param_value,
     http_hook_post,
 )
