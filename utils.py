@@ -6,7 +6,7 @@ from airflow.operators.python import get_current_context
 from airflow.providers.http.hooks.http import HttpHook
 
 
-def param_value(param: str) -> str:
+def param_value(param: str) -> Any:
     ctx = get_current_context()
     return  ctx["params"][param]
 
