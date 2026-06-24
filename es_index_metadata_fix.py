@@ -155,6 +155,10 @@ def es_index_lifecycle_metadata_fix():
                 f"/{tenant}/_settings/index.lifecycle.name",
                 params={"flat_settings": "true"},
             )
+            if not results:
+                logging.error(f"{tenant} - No indices found.")
+                continue
+
             logging.info(f"Fetched {len(results)} records")
             oldest_index = min(results)
             policy_name = results[oldest_index]["settings"]["index.lifecycle.name"]
