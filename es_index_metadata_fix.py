@@ -22,7 +22,7 @@ from utils import (
 )
 
 
-def update_index_settings(index, payload, conn_id: str, dry_run: bool):
+def apply_index_settings(index, payload, conn_id: str, dry_run: bool):
     logging.info(
         f"Updating '{index}' settings (dry-run={dry_run}): \n{json.dumps(payload, indent=2)}"
     )
@@ -68,7 +68,7 @@ def es_index_lifecycle_metadata_fix():
             "/_all/_settings/index.lifecycle.origination_date,index.creation_date",
             params={"flat_settings": "true"},
         )
-        mismatched_indices_by_month = defaultdict(list)
+        indices_needing_origination_fix_by_month = defaultdict(list)
         for index, r in fetched.items():
             if not INDEX_REGEX.match(index):
                 continue
@@ -89,12 +89,12 @@ def es_index_lifecycle_metadata_fix():
                 logging.info(
                     f"{index}: should be {index_date} instead of {origination_date} ({settings})."
                 )
-                mismatched_indices_by_month[index_date_str].append(index)
+                indices_needing_origination_fix_by_month[index_date_str].append(index)
 
-        add_alias_actions = []
-        for index_date_str, indices in mismatched_indices_by_month.items():
+        add_tmp_alias_actions = []
+        for index_date_str, indices in indices_needing_origination_fix_by_month.items():
             for index in indices:
-                add_alias_actions.append(
+                add_tmp_alias_actions.append(
                     {
                         "add": {
                             "index": index,
@@ -103,9 +103,9 @@ def es_index_lifecycle_metadata_fix():
                         }
                     }
                 )
-        apply_alias_actions(add_alias_actions, conn_id, dry_run)
+        apply_alias_actions(add_tmp_alias_actions, conn_id, dry_run)
 
-        for index_date_str in mismatched_indices_by_month.keys():
+        for index_date_str in indices_needing_origination_fix_by_month.keys():
             origination_date = int(
                 datetime.datetime.fromisoformat(index_date_str)
                 .replace(tzinfo=datetime.timezone.utc)
@@ -113,29 +113,29 @@ def es_index_lifecycle_metadata_fix():
                 * 1e3
             )
 
-            update_index_settings(
+            apply_index_settings(
                 f"temp-reconcile_origination_dates-{index_date_str}",
                 {"index.lifecycle.origination_date": origination_date},
                 conn_id,
                 dry_run,
             )
 
-        remove_alias_actions = [
+        remove_tmp_alias_actions = [
             {
                 "remove": {
                     "index": "*",
                     "alias": f"temp-reconcile_origination_dates-{year_month}",
                 }
             }
-            for year_month in mismatched_indices_by_month.keys()
+            for year_month in indices_needing_origination_fix_by_month.keys()
         ]
 
-        apply_alias_actions(remove_alias_actions, conn_id, dry_run)
+        apply_alias_actions(remove_tmp_alias_actions, conn_id, dry_run)
 
-        return mismatched_indices_by_month
+        return indices_needing_origination_fix_by_month
 
     @task
-    def expire_indices():
+    def mark_expired_indices_indexing_complete():
         dry_run = param_value("dry_run")
         conn_id = param_value("conn_id")
 
@@ -212,7 +212,7 @@ def es_index_lifecycle_metadata_fix():
         apply_alias_actions(add_alias_actions, conn_id, dry_run)
 
         if add_alias_actions:
-            update_index_settings(
+            apply_index_settings(
                 f"temp-expire_indices",
                 {"index.lifecycle.indexing_complete": True},
                 conn_id,
@@ -227,7 +227,7 @@ def es_index_lifecycle_metadata_fix():
         return expired
 
 
-    reconcile_origination_dates() >> expire_indices()
+    reconcile_origination_dates() >> mark_expired_indices_indexing_complete()
 
 
 es_index_lifecycle_metadata_fix()
