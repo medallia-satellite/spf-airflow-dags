@@ -135,8 +135,11 @@ def es_index_lifecycle_metadata_fix():
 
     @task
     def expire_indices():
+        dry_run = param_value("dry_run")
+        conn_id = param_value("conn_id")
+
         fetched = http_hook_get(
-            param_value("conn_id"),
+            conn_id,
             "/_cat/aliases",
             params={"h": "alias", "s": "alias", "format": "json"},
         )
@@ -148,7 +151,7 @@ def es_index_lifecycle_metadata_fix():
         retention = {}
         for tenant in tenants:
             results = http_hook_get(
-                param_value("conn_id"),
+                conn_id,
                 f"/{tenant}/_settings/index.lifecycle.name",
                 params={"flat_settings": "true"},
             )
