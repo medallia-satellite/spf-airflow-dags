@@ -223,11 +223,12 @@ def es_index_lifecycle_metadata_fix():
             dry_run,
         )
 
-        remove_alias_actions = [
-            {"remove": {"index": "*", "alias": f"temp-expire_indices"}}
-        ]
+        if add_alias_actions:
+            remove_alias_actions = [
+                {"remove": {"index": "*", "alias": f"temp-expire_indices"}}
+            ]
+            apply_alias_actions(remove_alias_actions, conn_id, dry_run)
 
-        apply_alias_actions(remove_alias_actions, conn_id, dry_run)
         return Context(success=True, value=expired)
 
     @task
