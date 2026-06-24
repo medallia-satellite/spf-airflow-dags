@@ -229,11 +229,9 @@ def es_index_lifecycle_metadata_fix():
             elif not c["success"]:
                 logging.error(f"{i}: {c['tenant']} - {c['error']}")
 
-
     t1 = reconcile_origination_dates()
     t2 = report(
         expired_indices.expand(context=fetch_retention.expand(context=fetch_tenants()))
     )
-    t1 > t2
 
 es_index_lifecycle_metadata_fix()
