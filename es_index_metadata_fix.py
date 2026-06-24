@@ -182,6 +182,31 @@ def es_index_lifecycle_metadata_fix():
             index for index in indices if index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
         ]
 
+        add_alias_actions = [
+            {
+                "add": {
+                    "index": index,
+                    "alias": f"temp-expire_indices",
+                    "is_write_index": False,
+                }
+            }
+            for index in expired
+        ]
+
+        apply_alias_actions(add_alias_actions, conn_id, dry_run)
+
+        update_index_settings(
+            f"temp-expire_indices",
+            {"index.lifecycle.indexing_complete": True},
+            conn_id,
+            dry_run,
+        )
+
+        remove_alias_actions = [
+            {"remove": {"index": "*", "alias": f"temp-expire_indices"}}
+        ]
+
+        apply_alias_actions(remove_alias_actions, conn_id, dry_run)
         return Context(success=True, value=expired)
 
     @task
