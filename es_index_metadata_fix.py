@@ -12,7 +12,7 @@ from fix_and_verify import (
     extract_index_details,
     index_has_expired,
     ALIAS_REGEX_MAPPING,
-    INDEX_REGEX,
+    INDEX_REGEX, BASE_REGEX,
 )
 from utils import (
     http_hook_get,
@@ -168,7 +168,21 @@ def es_index_lifecycle_metadata_fix():
 
             retention[tenant] = POLICY_MAPPING[policy_name]
 
-        return Context(success=True, value=retention)
+        results = http_hook_get(
+            conn_id,
+            f"/_cat/indices",
+            params={
+                "s": "index",
+                "h": "index",
+                "format": "json",
+            },
+        )
+        indices = [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
+        expired = [
+            index for index in indices if index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
+        ]
+
+        return Context(success=True, value=expired)
 
     @task
     def fetch_tenants() -> List[Context]:
