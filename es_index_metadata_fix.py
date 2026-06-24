@@ -159,9 +159,9 @@ def es_index_lifecycle_metadata_fix():
                 logging.error(f"{tenant} - No indices found.")
                 continue
 
-            logging.info(f"Fetched {len(results)} records")
-            oldest_index = min(results)
-            policy_name = results[oldest_index]["settings"]["index.lifecycle.name"]
+            logging.info(f"Fetched {len(results)} indices.")
+
+            policy_name = results[min(results)]["settings"]["index.lifecycle.name"]
             if policy_name not in POLICY_MAPPING:
                 logging.error(f"{tenant} - Invalid retention policy: {policy_name}")
                 continue
