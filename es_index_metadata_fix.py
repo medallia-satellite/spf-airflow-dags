@@ -200,7 +200,7 @@ def es_index_lifecycle_metadata_fix():
             index
             for index in indices
             if index not in already_marked
-            or index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
+            and index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
         ]
 
         add_alias_actions = [
