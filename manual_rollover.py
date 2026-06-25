@@ -113,6 +113,7 @@ def trigger_rollover_dag():
                 },
             )[-1]
             last_index = rollover["index"]
+            logging.info(f"{tenant} - {last_index}")
             details = extract_index_details(last_index)
 
             if datetime.date.fromisoformat(
