@@ -87,11 +87,11 @@ def trigger_rollover_dag():
             index_template = r["index_template"]
             comparable = {k: v for k, v in index_template.items() if k != "composed_of"}
             if comparable != expected_index_template(
-                tenant=tenants, retention_months=retention[tenant]
+                tenant=tenant, retention_months=retention[tenant]
             ):
                 dict1 = comparable
                 dict2 = expected_index_template(
-                tenant=tenants, retention_months=retention[tenant]
+                tenant=tenant, retention_months=retention[tenant]
             )
                 diff = {k: dict2[k] for k in dict2 if dict2.get(k) != dict1.get(k)}
                 logging.error(f"{tenant} template does not match expected\n{index_template}\n{diff}")
