@@ -197,8 +197,7 @@ def es_index_lifecycle_metadata_fix():
         expired = [
             index
             for index in indices
-            if index not in already_marked
-            and index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
+            if index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
         ]
 
         add_alias_actions = [
@@ -210,6 +209,7 @@ def es_index_lifecycle_metadata_fix():
                 }
             }
             for index in expired
+            if index not in already_marked
         ]
 
         apply_alias_actions(add_alias_actions, conn_id, dry_run)
