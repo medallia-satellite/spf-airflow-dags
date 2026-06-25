@@ -12,7 +12,7 @@ from fix_and_verify import (
     POLICY_MAPPING,
     expected_index_template,
     extract_index_details,
-    BASE_REGEX,
+    BASE_REGEX, INDEX_REGEX,
 )
 from utils import (
     http_hook_get,
@@ -116,6 +116,10 @@ def trigger_rollover_dag():
             )[-1]
             last_index = rollover["index"]
             logging.info(f"{tenant} - {last_index}")
+            if not INDEX_REGEX.match(last_index):
+                logging.error(f"{tenant} - Skipping {last_index}")
+                continue
+
             details = extract_index_details(last_index)
 
             if datetime.date.fromisoformat(
