@@ -15,7 +15,6 @@ from fix_and_verify import (
     BASE_REGEX, INDEX_REGEX,
 )
 from utils import (
-    http_hook_get,
     param_value,
     http_hook_post, http_get,
 )
@@ -91,12 +90,7 @@ def trigger_rollover_dag():
             if comparable != expected_index_template(
                 tenant=tenant, retention_months=retention[tenant]
             ):
-                dict1 = comparable
-                dict2 = expected_index_template(
-                tenant=tenant, retention_months=retention[tenant]
-            )
-                diff = {k: dict2[k] for k in dict2 if dict2.get(k) != dict1.get(k)}
-                logging.error(f"{tenant} template does not match expected\n{index_template}\n{diff}")
+                logging.error(f"{tenant} template does not match expected\n{comparable}")
                 continue
             index_templates[tenant] = index_template
 
@@ -115,7 +109,6 @@ def trigger_rollover_dag():
                 },
             )[-1]
             last_index = rollover["index"]
-            logging.info(f"{tenant} - {last_index}")
             if not INDEX_REGEX.match(last_index):
                 logging.error(f"{tenant} - Skipping {last_index}")
                 continue
