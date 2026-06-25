@@ -165,7 +165,6 @@ def es_index_lifecycle_metadata_fix():
 
 
             retention[tenant] = POLICY_MAPPING[policy_name]
-            logging.info(f"{tenant} - {len(results)} indices found, retention policy {retention[tenant]}")
 
         results = http_hook_get(
             conn_id,
