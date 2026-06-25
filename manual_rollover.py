@@ -4,6 +4,7 @@ import logging
 
 from airflow.decorators import dag, task
 from airflow.models import Param
+from airflow.providers.http.hooks.http import HttpHook
 from dateutil.relativedelta import relativedelta
 
 from fix_and_verify import (
@@ -16,7 +17,7 @@ from fix_and_verify import (
 from utils import (
     http_hook_get,
     param_value,
-    http_hook_post,
+    http_hook_post, http_get,
 )
 
 
@@ -40,9 +41,10 @@ def trigger_rollover_dag():
         # fetch
         dry_run = param_value("dry_run")
         conn_id = param_value("conn_id")
+        hook_get = HttpHook(method="GET", http_conn_id=conn_id)
 
-        fetched = http_hook_get(
-            conn_id,
+        fetched = http_get(
+            hook_get,
             "/_cat/aliases",
             params={"h": "alias", "s": "alias", "format": "json"},
         )
@@ -53,8 +55,8 @@ def trigger_rollover_dag():
         # verify retention
         retention = {}
         for tenant in tenants:
-            results = http_hook_get(
-                conn_id,
+            results = http_get(
+                hook_get,
                 f"/{tenant}/_settings/index.lifecycle.name",
                 params={"flat_settings": "true"},
             )
@@ -71,7 +73,7 @@ def trigger_rollover_dag():
 
         # verify index template
         index_templates = {}
-        results = http_hook_get(conn_id, "/_index_template/*-rollover")
+        results = http_get(hook_get, "/_index_template/*-rollover")
         for r in results["index_templates"]:
             if not ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
                 logging.warning(f"Invalid rollover alias: {r['name']}")
@@ -103,8 +105,8 @@ def trigger_rollover_dag():
         for tenant in tenants:
 
             # verify latest rollover alias is current month
-            rollover = http_hook_get(
-                conn_id,
+            rollover = http_get(
+                hook_get,
                 f"/_cat/aliases/{tenant}-rollover",
                 params={
                     "s": "index",

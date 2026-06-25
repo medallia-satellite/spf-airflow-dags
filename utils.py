@@ -58,6 +58,16 @@ def http_hook_get(conn_id: str, endpoint: str, params: Optional[dict] = None):
     return response.json()
 
 
+def http_get(hook: HttpHook, endpoint: str, params: Optional[dict] = None):
+    response = hook.run(
+        endpoint=endpoint,
+        data=params,
+        headers={"Accept": "application/json"},
+    )
+    hook.check_response(response)
+    return response.json()
+
+
 def chain_on_success(func):
     @functools.wraps(func)
     def wrapper(context):
