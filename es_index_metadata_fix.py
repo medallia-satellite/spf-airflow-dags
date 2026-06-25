@@ -178,9 +178,8 @@ def es_index_lifecycle_metadata_fix():
         indices = [
             r["index"]
             for r in results
-            if INDEX_REGEX.match(
-                r["index"] and BASE_REGEX.search(r["index"]).group(0) in retention
-            )
+            if INDEX_REGEX.match(r["index"])
+            and BASE_REGEX.search(r["index"]).group(0) in retention
         ]
 
         results = http_hook_get(
