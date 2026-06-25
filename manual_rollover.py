@@ -144,7 +144,7 @@ def trigger_rollover_dag():
                     f"{tenant}-{str(target_date.date())}": {"is_write_index": True},
                 },
             }
-            provided_name = f"%3Cseaas-{tenant}-%7Bnow%2FM+1M%7Byyyy-MM-dd%7D%7D-{details['tenant_id']}-{details['suffix']+1}%3E"
+            provided_name = f"%3Cseaas-{tenant}-%7Bnow%2FM+1M%7Byyyy-MM-dd%7D%7D-{details['tenant_id']}-{details['suffix']+1:06}%3E"
             logging.info(
                 f"Rolling over: {tenant} (dry-run={dry_run})\n{provided_name}\n{json.dumps(payload, indent=2)}"
             )
