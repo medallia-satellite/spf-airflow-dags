@@ -44,7 +44,7 @@ def apply_alias_actions(actions: list[dict], conn_id: str, dry_run: bool):
 
 
 @dag(
-    dag_display_name="Elasticsearch ILM Metadata Fix",
+    dag_display_name="Index Lifecycle Metadata Fix",
     tags=["spf", "elasticsearch"],
     description="Fixes ILM origination-date metadata and finalizes expired indices in Elasticsearch.",
     max_active_runs=1,
@@ -135,7 +135,7 @@ def es_index_lifecycle_metadata_fix():
         return indices_needing_origination_fix_by_month
 
     @task
-    def mark_expired_indices_indexing_complete():
+    def mark_indexing_complete():
         dry_run = param_value("dry_run")
         conn_id = param_value("conn_id")
 
@@ -163,7 +163,6 @@ def es_index_lifecycle_metadata_fix():
                 logging.error(f"{tenant} - Invalid retention policy: {policy_name}")
                 continue
 
-
             retention[tenant] = POLICY_MAPPING[policy_name]
 
         results = http_hook_get(
@@ -176,7 +175,13 @@ def es_index_lifecycle_metadata_fix():
             },
         )
 
-        indices = [r["index"] for r in results if INDEX_REGEX.match(r["index"])]
+        indices = [
+            r["index"]
+            for r in results
+            if INDEX_REGEX.match(
+                r["index"] and BASE_REGEX.search(r["index"]).group(0) in retention
+            )
+        ]
 
         results = http_hook_get(
             conn_id,
@@ -225,8 +230,7 @@ def es_index_lifecycle_metadata_fix():
 
         return expired
 
-
-    reconcile_origination_dates() >> mark_expired_indices_indexing_complete()
+    reconcile_origination_dates() >> mark_indexing_complete()
 
 
 es_index_lifecycle_metadata_fix()
