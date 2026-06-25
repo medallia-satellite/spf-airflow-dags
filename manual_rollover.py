@@ -125,27 +125,23 @@ def trigger_rollover_dag():
                 logging.error(f"{tenant} - {last_index} is not write index")
                 continue
 
-            origination_date = int(
-                (
-                    datetime.datetime.today().replace(
+            target_date = datetime.datetime.today().replace(
                         day=1,
                         hour=0,
                         minute=0,
                         second=0,
                         microsecond=0,
                         tzinfo=datetime.timezone.utc,
-                    )
-                    + relativedelta(months=1)
-                ).timestamp()
-                * 1e3
-            )
+                    ) + relativedelta(months=1)
+            origination_date = int(target_date.timestamp() * 1e3)
+
             payload = {
                 "settings": {
                     "index.lifecycle.origination_date": origination_date,
                 },
                 "aliases": {
-                    details["read_alias"]: {"is_write_index": False},
-                    details["write_alias"]: {"is_write_index": True},
+                    tenant: {"is_write_index": False},
+                    f"{tenant}-{str(target_date.date())}": {"is_write_index": True},
                 },
             }
             provided_name = f"%3Cseaas-{tenant}-%7Bnow%2FM+1M%7Byyyy-MM-dd%7D%7D-{details['tenant_id']}-{details['suffix']+1}%3E"
