@@ -149,7 +149,7 @@ def finalize_expired_indices_dag():
                 return failure(context=context, stage=stage, error=expired)
             return success(context=context, stage=stage)
 
-        @task
+        @task(max_active_tis_per_dagrun=50)
         @chain_on_error_in_stage(stage=stage)
         def fix(context: Context) -> Context:
             # Marking indexing as completed unblocks ILMs retention lifecycle when rollovers are performed manually.
