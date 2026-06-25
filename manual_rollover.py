@@ -89,7 +89,7 @@ def trigger_rollover_dag():
             if comparable != expected_index_template(
                 tenant=tenants, retention_months=retention[tenant]
             ):
-                logging.error(f"{tenant} template does not match expected")
+                logging.error(f"{tenant} template does not match expected\n{index_template}")
                 continue
 
             index_templates[tenant] = index_template
