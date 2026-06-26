@@ -38,11 +38,10 @@ def http_hook_put(conn_id: str, endpoint: str, data: str):
 
 def http_hook_post(conn_id: str, endpoint: str, data: str, params: Optional[dict] = None):
     hook_post = HttpHook(method="POST", http_conn_id=conn_id)
-    extra_opts = {"params": params} if params else {}
     response = hook_post.run(
         endpoint=f"/{endpoint}?pretty",
         headers={"Content-Type": "application/json"},
-        extra_options=extra_opts,
+        params=params,
         data=data,
     )
     hook_post.check_response(response)
