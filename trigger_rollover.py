@@ -106,9 +106,9 @@ def fetch_valid_templates_by_tenant(
 
 
 @dag(
-    dag_display_name="Trigger Manual Rollover",
+    dag_display_name="Trigger Rollover",
     tags=["spf", "elasticsearch"],
-    description="Triggers a manual rollover for the next month for all tenants with valid rollover index templates and retention policies.",
+    description="Triggers a rollover for the next month for all tenants with valid rollover index templates and retention policies.",
     max_active_runs=1,
     schedule=None,
     catchup=False,
@@ -198,7 +198,7 @@ def trigger_rollover_dag():
 
             rolled_over.append(latest_index)
 
-        logging.info(f"Rolled over {len(rolled_over)} tenants: {rolled_over}")
+        logging.info(f"Rolled over {len(rolled_over)} indices.")
         return rolled_over
 
     trigger_rollover()
