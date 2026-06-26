@@ -187,14 +187,14 @@ def trigger_rollover_dag():
                 f"{json.dumps(payload, indent=2)}"
             )
 
-            if not dry_run:
-                response = http_hook_post(
-                    conn_id,
-                    f"{tenant}-rollover/_rollover/{rollover_target}",
-                    json.dumps(payload),
-                    params={"dry_run": dry_run},
-                )
-                logging.info(f"Response:\n{json.dumps(response, indent=2)}")
+            response = http_hook_post(
+                conn_id,
+                f"{tenant}-rollover/_rollover/{rollover_target}",
+                json.dumps(payload),
+                params={"dry_run": dry_run},
+            )
+
+            logging.info(f"Response:\n{json.dumps(response, indent=2)}")
 
             rolled_over.append(latest_index)
 
