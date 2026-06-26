@@ -59,7 +59,7 @@ def apply_alias_actions(actions: list[dict], conn_id: str, dry_run: bool):
 def es_index_lifecycle_metadata_fix():
 
     @task
-    def reconcile_origination_dates():
+    def set_origination_dates():
         dry_run = param_value("dry_run")
         conn_id = param_value("conn_id")
 
@@ -197,8 +197,7 @@ def es_index_lifecycle_metadata_fix():
         expired = [
             index
             for index in indices
-            if index not in already_marked
-            and index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
+            if index_has_expired(index, retention[BASE_REGEX.search(index).group(0)])
         ]
 
         add_alias_actions = [
@@ -210,6 +209,7 @@ def es_index_lifecycle_metadata_fix():
                 }
             }
             for index in expired
+            if index not in already_marked
         ]
 
         apply_alias_actions(add_alias_actions, conn_id, dry_run)
@@ -229,7 +229,7 @@ def es_index_lifecycle_metadata_fix():
 
         return expired
 
-    reconcile_origination_dates() >> mark_indexing_complete()
+    set_origination_dates() >> mark_indexing_complete()
 
 
 es_index_lifecycle_metadata_fix()

@@ -36,11 +36,12 @@ def http_hook_put(conn_id: str, endpoint: str, data: str):
     return response.json()
 
 
-def http_hook_post(conn_id: str, endpoint: str, data: str):
+def http_hook_post(conn_id: str, endpoint: str, data: str, params: dict) -> Any:
     hook_post = HttpHook(method="POST", http_conn_id=conn_id)
     response = hook_post.run(
         endpoint=f"/{endpoint}?pretty",
         headers={"Content-Type": "application/json"},
+        params=params,
         data=data,
     )
     hook_post.check_response(response)
