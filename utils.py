@@ -38,10 +38,11 @@ def http_hook_put(conn_id: str, endpoint: str, data: str):
 
 def http_hook_post(conn_id: str, endpoint: str, data: str, params: Optional[dict] = None):
     hook_post = HttpHook(method="POST", http_conn_id=conn_id)
+    extra_opts = {"params": params} if params else {}
     response = hook_post.run(
         endpoint=f"/{endpoint}?pretty",
         headers={"Content-Type": "application/json"},
-        get_params=params,
+        extra_options=extra_opts,
         data=data,
     )
     hook_post.check_response(response)
@@ -52,7 +53,7 @@ def http_hook_get(conn_id: str, endpoint: str, params: Optional[dict] = None):
     hook_get = HttpHook(method="GET", http_conn_id=conn_id)
     response = hook_get.run(
         endpoint=endpoint,
-        get_params=params,
+        data=params,
         headers={"Accept": "application/json"},
     )
     hook_get.check_response(response)
