@@ -191,7 +191,7 @@ def trigger_rollover_dag():
                 conn_id,
                 f"{tenant}-rollover/_rollover/{rollover_target}",
                 json.dumps(payload),
-                params={"dry_run": dry_run},
+                params=json.dumps({"dry_run": dry_run}),
             )
 
             logging.info(f"Response:\n{json.dumps(response, indent=2)}")
