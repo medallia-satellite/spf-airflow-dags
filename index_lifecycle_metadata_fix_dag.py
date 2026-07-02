@@ -232,4 +232,4 @@ def index_lifecycle_metadata_fix_dag():
     set_origination_dates() >> mark_indexing_complete()
 
 
-es_index_lifecycle_metadata_fix()
+index_lifecycle_metadata_fix_dag()
