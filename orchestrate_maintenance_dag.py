@@ -37,7 +37,7 @@ def orchestrate_maintenance_dag():
             dag_t2 = "index_lifecycle_metadata_fix_dag"
             t2 = TriggerDagRunOperator(
                 task_id=f"{dag_t2}__{target}",
-                trigger_dag_id=dag_t1,
+                trigger_dag_id=dag_t2,
                 wait_for_completion=True,
                 poke_interval=30,
                 conf=config,
