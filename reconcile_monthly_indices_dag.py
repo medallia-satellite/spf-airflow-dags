@@ -42,7 +42,7 @@ from utils import (
     },
     render_template_as_native_obj=True,
 )
-def reconcile_wordtags_indices_dag():
+def reconcile_monthly_indices_dag():
     @task
     def fetch_indices_per_tenant() -> List[Context]:
         conn_id = param_value("conn_id")
@@ -360,4 +360,4 @@ def reconcile_wordtags_indices_dag():
     t5 = aliases(upstream=t4)
 
 
-reconcile_wordtags_indices_dag()
+reconcile_monthly_indices_dag()
