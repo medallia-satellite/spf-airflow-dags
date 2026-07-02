@@ -11,8 +11,8 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
     tags=["spf", "elasticsearch"],
     description="This DAG uses 'orchestrate_dag_targets' as targets to trigger maintenance workflows.",
     max_active_runs=1,
-    schedule="@weekly",
-    start_date=datetime(2026, 5, 13),
+    start_date=datetime(2026, 1, 1),
+    schedule="@monthly",
     catchup=False,
     render_template_as_native_obj=True,
 )
@@ -22,18 +22,22 @@ def orchestrate_maintenance_dag():
         deserialize_json=True,
         default_var = None,
     )
+
     if targets:
         for target, config in targets.items():
+            dag_t1 = "reconcile_monthly_indices_dag"
             t1 = TriggerDagRunOperator(
-                task_id=f"reconcile_wordtags_indices__{target}",
-                trigger_dag_id="reconcile_wordtags_indices_dag",
+                task_id=f"{dag_t1}__{target}",
+                trigger_dag_id=dag_t1,
                 wait_for_completion=True,
                 poke_interval=30,
                 conf=config,
             )
+
+            dag_t2 = "index_lifecycle_metadata_fix_dag"
             t2 = TriggerDagRunOperator(
-                task_id=f"finalize_expired_indices__{target}",
-                trigger_dag_id="finalize_expired_indices_dag",
+                task_id=f"{dag_t2}__{target}",
+                trigger_dag_id=dag_t2,
                 wait_for_completion=True,
                 poke_interval=30,
                 conf=config,

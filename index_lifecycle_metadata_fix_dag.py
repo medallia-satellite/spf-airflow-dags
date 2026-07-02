@@ -56,7 +56,7 @@ def apply_alias_actions(actions: list[dict], conn_id: str, dry_run: bool):
     },
     render_template_as_native_obj=True,
 )
-def es_index_lifecycle_metadata_fix():
+def index_lifecycle_metadata_fix_dag():
 
     @task
     def set_origination_dates():
@@ -160,7 +160,7 @@ def es_index_lifecycle_metadata_fix():
 
             policy_name = results[min(results)]["settings"]["index.lifecycle.name"]
             if policy_name not in POLICY_MAPPING:
-                logging.error(f"{tenant} - Invalid retention policy: {policy_name}")
+                logging.error(f"{tenant} - Invalid retention policy: {policy_name}\n{json.dumps(results[min(results)], indent=2)}")
                 continue
 
             retention[tenant] = POLICY_MAPPING[policy_name]
@@ -232,4 +232,4 @@ def es_index_lifecycle_metadata_fix():
     set_origination_dates() >> mark_indexing_complete()
 
 
-es_index_lifecycle_metadata_fix()
+index_lifecycle_metadata_fix_dag()
