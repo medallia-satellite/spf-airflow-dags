@@ -88,7 +88,7 @@ def fetch_valid_templates_by_tenant(
 
         tenant = tenant_match.group(0)
         if tenant not in retention_by_tenant:
-            logging.warning(f"{tenant}: skipping '{template_name}', no retention policy found.")
+            logging.warning(f"Skipping '{template_name}', invalid tenant '{tenant}'")
             continue
 
         index_template = row["index_template"]
@@ -160,7 +160,7 @@ def trigger_rollover_dag():
             index_month = datetime.date.fromisoformat(details["month"])
 
             if index_month != current_month_start:
-                logging.info(f"{tenant}: latest index is {latest_index}, not current month—skipping.")
+                logging.info(f"{tenant}: latest index is {latest_index}, not current month. Skipping.")
                 continue
 
             if latest["is_write_index"] != "true":
