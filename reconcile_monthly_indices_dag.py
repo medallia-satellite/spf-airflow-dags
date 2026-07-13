@@ -30,7 +30,7 @@ from utils import (
 
 
 @dag(
-    dag_display_name="Reconcile Wordtags Indices",
+    dag_display_name="Reconcile Monthly Indices",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     max_active_runs=1,
