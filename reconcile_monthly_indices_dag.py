@@ -24,9 +24,11 @@ from utils import (
     success,
     failure,
     wait_for_completion,
-    select_eligible_for_fix, param_value, http_hook_put, http_hook_post,
+    select_eligible_for_fix,
+    param_value,
+    http_hook_put,
+    http_hook_post,
 )
-
 
 
 @dag(
@@ -54,7 +56,7 @@ def reconcile_monthly_indices_dag():
                 "s": "index",
                 "h": "index",
                 "format": "json",
-            }
+            },
         )
 
         results = defaultdict(list)
@@ -75,7 +77,7 @@ def reconcile_monthly_indices_dag():
                     success=True,
                     tenant=k[0],
                     tenant_id=k[1],
-                    latest_suffix=latest_suffix
+                    latest_suffix=latest_suffix,
                 )
             )
         return grouped
@@ -108,7 +110,9 @@ def reconcile_monthly_indices_dag():
             ]
 
             policies = [il.get("name") for il in il_list]
-            rollover = [il.get("rollover_alias") for il in il_list if il.get("rollover_alias")]
+            rollover = [
+                il.get("rollover_alias") for il in il_list if il.get("rollover_alias")
+            ]
 
             if (
                 len(set(POLICY_MAPPING.get(p) for p in policies)) != 1
@@ -190,9 +194,9 @@ def reconcile_monthly_indices_dag():
 
             template_name = f"{context['tenant']}-rollover"
             index_template = expected_index_template(
-                    tenant=context["tenant"],
-                    retention_months=context["retention"],
-                )
+                tenant=context["tenant"],
+                retention_months=context["retention"],
+            )
 
             print(
                 f"Creating Index template: {template_name} (dry-run={dry_run})\n{json.dumps(index_template, indent=2)}"
@@ -202,10 +206,9 @@ def reconcile_monthly_indices_dag():
                 response = http_hook_put(
                     conn_id,
                     f"_index_template/{template_name}",
-                    json.dumps(index_template)
+                    json.dumps(index_template),
                 )
                 print(f"Response:\n{json.dumps(response, indent=2)}")
-
 
             return success(context=context, stage=stage)
 
@@ -242,7 +245,11 @@ def reconcile_monthly_indices_dag():
                 suffix += 1
                 index = f'seaas-{write_alias}-{context["tenant_id"]}-{suffix:06}'
                 details = extract_index_details(index)
-                policy = f'M{context["retention"]}_rollover' if details["should_rollover"] else f'M{context["retention"]}'
+                policy = (
+                    f'M{context["retention"]}_rollover'
+                    if details["should_rollover"]
+                    else f'M{context["retention"]}'
+                )
                 payload = {
                     "settings": {
                         "index.lifecycle.origination_date": details["origination_date"],
@@ -269,7 +276,6 @@ def reconcile_monthly_indices_dag():
                 if c["value"] and c["stage"] == stage:
                     logging.info(f"{i}: {c['tenant']}\n{c['value']}")
 
-
         r = reconcile.expand(context=upstream)
         report(r)
 
@@ -284,7 +290,7 @@ def reconcile_monthly_indices_dag():
                 params={
                     "s": "index",
                     "format": "json",
-                    "h": "alias,index,is_write_index"
+                    "h": "alias,index,is_write_index",
                 },
             )
 
@@ -412,7 +418,6 @@ def reconcile_monthly_indices_dag():
             for i, c in enumerate(contexts):
                 if c["value"] and c["stage"] == stage:
                     logging.info(f"{i}: {c['tenant']}\n{c['value']}")
-
 
         r = reconcile.expand(context=upstream)
         report(r)

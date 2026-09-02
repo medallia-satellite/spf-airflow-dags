@@ -20,7 +20,7 @@ def orchestrate_maintenance_dag():
     targets = Variable.get(
         "orchestrate_dag_targets",
         deserialize_json=True,
-        default_var = None,
+        default_var=None,
     )
 
     if targets:
@@ -45,5 +45,6 @@ def orchestrate_maintenance_dag():
             t1 >> t2
     else:
         EmptyOperator(task_id="no_targets_configured")
+
 
 orchestrate_maintenance_dag()

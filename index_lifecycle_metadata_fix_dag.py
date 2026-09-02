@@ -160,7 +160,9 @@ def index_lifecycle_metadata_fix_dag():
 
             policy_name = results[min(results)]["settings"]["index.lifecycle.name"]
             if policy_name not in POLICY_MAPPING:
-                logging.error(f"{tenant} - Invalid retention policy: {policy_name}\n{json.dumps(results[min(results)], indent=2)}")
+                logging.error(
+                    f"{tenant} - Invalid retention policy: {policy_name}\n{json.dumps(results[min(results)], indent=2)}"
+                )
                 continue
 
             retention[tenant] = POLICY_MAPPING[policy_name]
