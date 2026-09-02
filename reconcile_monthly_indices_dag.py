@@ -318,6 +318,7 @@ def reconcile_monthly_indices_dag():
                 context["tenant"], context["retention"]
             ):
                 if monthly_alias not in write_alias:
+                    continue
                     indices = [
                         index
                         for index in xcom_pull(
