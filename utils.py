@@ -8,7 +8,7 @@ from airflow.providers.http.hooks.http import HttpHook
 
 def param_value(param: str) -> Any:
     ctx = get_current_context()
-    return  ctx["params"][param]
+    return ctx["params"][param]
 
 
 def xcom_pull(task_id: str, key: str) -> Any:
@@ -36,7 +36,9 @@ def http_hook_put(conn_id: str, endpoint: str, data: str):
     return response.json()
 
 
-def http_hook_post(conn_id: str, endpoint: str, data: str, params: Optional[dict] = None) -> Any:
+def http_hook_post(
+    conn_id: str, endpoint: str, data: str, params: Optional[dict] = None
+) -> Any:
     hook_post = HttpHook(method="POST", http_conn_id=conn_id)
     response = hook_post.run(
         endpoint=f"/{endpoint}?pretty",

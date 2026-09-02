@@ -24,9 +24,11 @@ from utils import (
     success,
     failure,
     wait_for_completion,
-    select_eligible_for_fix, param_value, http_hook_put, http_hook_post,
+    select_eligible_for_fix,
+    param_value,
+    http_hook_put,
+    http_hook_post,
 )
-
 
 
 @dag(
@@ -54,7 +56,7 @@ def reconcile_monthly_indices_dag():
                 "s": "index",
                 "h": "index",
                 "format": "json",
-            }
+            },
         )
 
         results = defaultdict(list)
@@ -75,7 +77,7 @@ def reconcile_monthly_indices_dag():
                     success=True,
                     tenant=k[0],
                     tenant_id=k[1],
-                    latest_suffix=latest_suffix
+                    latest_suffix=latest_suffix,
                 )
             )
         return grouped
@@ -108,7 +110,9 @@ def reconcile_monthly_indices_dag():
             ]
 
             policies = [il.get("name") for il in il_list]
-            rollover = [il.get("rollover_alias") for il in il_list if il.get("rollover_alias")]
+            rollover = [
+                il.get("rollover_alias") for il in il_list if il.get("rollover_alias")
+            ]
 
             if (
                 len(set(POLICY_MAPPING.get(p) for p in policies)) != 1
@@ -190,9 +194,9 @@ def reconcile_monthly_indices_dag():
 
             template_name = f"{context['tenant']}-rollover"
             index_template = expected_index_template(
-                    tenant=context["tenant"],
-                    retention_months=context["retention"],
-                )
+                tenant=context["tenant"],
+                retention_months=context["retention"],
+            )
 
             print(
                 f"Creating Index template: {template_name} (dry-run={dry_run})\n{json.dumps(index_template, indent=2)}"
@@ -202,10 +206,9 @@ def reconcile_monthly_indices_dag():
                 response = http_hook_put(
                     conn_id,
                     f"_index_template/{template_name}",
-                    json.dumps(index_template)
+                    json.dumps(index_template),
                 )
                 print(f"Response:\n{json.dumps(response, indent=2)}")
-
 
             return success(context=context, stage=stage)
 
@@ -215,6 +218,12 @@ def reconcile_monthly_indices_dag():
         t = wait_for_completion(upstream=verified)
         fixed >> t
         return t
+
+    @task
+    def report(contexts: List[Context], stage: str) -> None:
+        for i, c in enumerate(contexts):
+            if c["value"] and c["stage"] == stage:
+                logging.info(f"{i}: {c['tenant']}\n{c['value']}")
 
     @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
@@ -242,7 +251,11 @@ def reconcile_monthly_indices_dag():
                 suffix += 1
                 index = f'seaas-{write_alias}-{context["tenant_id"]}-{suffix:06}'
                 details = extract_index_details(index)
-                policy = f'M{context["retention"]}_rollover' if details["should_rollover"] else f'M{context["retention"]}'
+                policy = (
+                    f'M{context["retention"]}_rollover'
+                    if details["should_rollover"]
+                    else f'M{context["retention"]}'
+                )
                 payload = {
                     "settings": {
                         "index.lifecycle.origination_date": details["origination_date"],
@@ -263,15 +276,8 @@ def reconcile_monthly_indices_dag():
 
             return success(context=context, stage=stage, value=missing)
 
-        @task
-        def report(contexts: List[Context]) -> None:
-            for i, c in enumerate(contexts):
-                if c["value"] and c["stage"] == stage:
-                    logging.info(f"{i}: {c['tenant']}\n{c['value']}")
-
-
         r = reconcile.expand(context=upstream)
-        report(r)
+        report(r, stage=stage)
 
         return r
 
@@ -284,7 +290,7 @@ def reconcile_monthly_indices_dag():
                 params={
                     "s": "index",
                     "format": "json",
-                    "h": "alias,index,is_write_index"
+                    "h": "alias,index,is_write_index",
                 },
             )
 
@@ -298,41 +304,107 @@ def reconcile_monthly_indices_dag():
             tenant = context["tenant"]
             actions = []
 
-            read_alias = [r["index"] for r in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}")]
+            read_alias = [
+                r["index"] for r in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}")
+            ]
 
             write_alias = defaultdict(list)
             for resp in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}-20*"):
-                write_alias[resp["alias"]].append((resp["index"], resp["is_write_index"]))
+                write_alias[resp["alias"]].append(
+                    (resp["index"], resp["is_write_index"])
+                )
 
             for monthly_alias in generate_write_aliases(
-                    context["tenant"], context["retention"]
+                context["tenant"], context["retention"]
             ):
                 if monthly_alias not in write_alias:
+                    indices = [
+                        index
+                        for index in xcom_pull(
+                            "fetch_indices_per_tenant", context["tenant"]
+                        )
+                        if index.startswith(f"seaas-{monthly_alias}")
+                    ]
+                    if not indices:
+                        return failure(
+                            context=context,
+                            stage=stage,
+                            error=f"Missing index for {monthly_alias}",
+                        )
+                    latest_index = indices[-1]
+                    actions.append(
+                        {
+                            "add": {
+                                "index": latest_index,
+                                "alias": monthly_alias,
+                                "is_write_index": True,
+                            }
+                        }
+                    )
+                    if not latest_index in read_alias:
+                        actions.append(
+                            {
+                                "add": {
+                                    "index": latest_index,
+                                    "alias": tenant,
+                                    "is_write_index": False,
+                                }
+                            }
+                        )
                     continue
 
-                if not any(is_write_index == "true" for _, is_write_index in write_alias.get(monthly_alias)):
+                if not any(
+                    is_write_index == "true"
+                    for _, is_write_index in write_alias.get(monthly_alias)
+                ):
                     latest_index = write_alias.get(monthly_alias)[-1][0]
-                    actions.append({
-                        "add": {"index": latest_index, "alias": monthly_alias, "is_write_index": True}
-                    })
+                    actions.append(
+                        {
+                            "add": {
+                                "index": latest_index,
+                                "alias": monthly_alias,
+                                "is_write_index": True,
+                            }
+                        }
+                    )
 
                 for index, _ in write_alias.get(monthly_alias):
                     if not index in read_alias:
-                        actions.append({
-                            "add": {"index": index, "alias": tenant, "is_write_index": False}
-                        })
+                        actions.append(
+                            {
+                                "add": {
+                                    "index": index,
+                                    "alias": tenant,
+                                    "is_write_index": False,
+                                }
+                            }
+                        )
 
             rollover = fetch_aliases(conn_id, f"/_cat/aliases/{tenant}-rollover")[-1]
             if not rollover["is_write_index"] == "true":
-                actions.append({
-                    "add": {"index": f"seaas-{tenant}-*", "alias": f"{tenant}-rollover", "is_write_index": False}
-                })
-                actions.append({
-                    "add": {"index": rollover["index"], "alias": f"{tenant}-rollover", "is_write_index": True}
-                })
+                actions.append(
+                    {
+                        "add": {
+                            "index": f"seaas-{tenant}-*",
+                            "alias": f"{tenant}-rollover",
+                            "is_write_index": False,
+                        }
+                    }
+                )
+                actions.append(
+                    {
+                        "add": {
+                            "index": rollover["index"],
+                            "alias": f"{tenant}-rollover",
+                            "is_write_index": True,
+                        }
+                    }
+                )
 
             if actions and not dry_run:
-                response = http_hook_post(conn_id, "/_aliases/", json.dumps({"actions": actions}))
+                response = http_hook_post(
+                    conn_id, "/_aliases/", json.dumps({"actions": actions})
+                )
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
             return success(
@@ -341,15 +413,9 @@ def reconcile_monthly_indices_dag():
                 value=actions,
             )
 
-        @task
-        def report(contexts: List[Context]) -> None:
-            for i, c in enumerate(contexts):
-                if c["value"] and c["stage"] == stage:
-                    logging.info(f"{i}: {c['tenant']}\n{c['value']}")
-
 
         r = reconcile.expand(context=upstream)
-        report(r)
+        report(r, stage=stage)
 
         return r
 

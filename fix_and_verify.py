@@ -25,21 +25,21 @@ POLICY_MAPPING = {
 }
 
 INDEX_TEMPLATE_SETTINGS_INDEX_ANALYSIS = {
-                        "filter": {
-                            "compound_capture": {
-                                "type": "pattern_capture",
-                                "preserve_original": "false",
-                                "patterns": ["(!?[^@!@]+)@!@"],
-                            }
-                        },
-                        "analyzer": {
-                            "topic-builder-analyzer": {
-                                "filter": ["compound_capture"],
-                                "type": "custom",
-                                "tokenizer": "whitespace",
-                            }
-                        },
-                    }
+    "filter": {
+        "compound_capture": {
+            "type": "pattern_capture",
+            "preserve_original": "false",
+            "patterns": ["(!?[^@!@]+)@!@"],
+        }
+    },
+    "analyzer": {
+        "topic-builder-analyzer": {
+            "filter": ["compound_capture"],
+            "type": "custom",
+            "tokenizer": "whitespace",
+        }
+    },
+}
 INDEX_TEMPLATE_MAPPINGS = {
     "properties": {
         "comments": {
@@ -67,6 +67,7 @@ INDEX_TEMPLATE_MAPPINGS = {
         "surveyId": {"type": "long"},
     },
 }
+
 
 def expected_index_template(tenant, retention_months):
     return {
@@ -133,9 +134,8 @@ def is_past_retention_limit(iso_date_str: str, retention_months: int) -> bool:
 
 def generate_write_aliases(tenant, retention_months):
     current_month_start = (
-        (datetime.datetime.today() - relativedelta(months=retention_months))
-        .replace(day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc)
-    )
+        datetime.datetime.today() - relativedelta(months=retention_months)
+    ).replace(day=1, hour=0, minute=0, second=0, tzinfo=datetime.timezone.utc)
     return [
         f"{tenant}-{current_month_start + relativedelta(months=i):%Y-%m-%d}"
         for i in range(retention_months + 1)
