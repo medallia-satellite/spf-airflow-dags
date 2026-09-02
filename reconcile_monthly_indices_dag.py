@@ -323,7 +323,7 @@ def reconcile_monthly_indices_dag():
                         for index in xcom_pull(
                             "fetch_indices_per_tenant", context["tenant"]
                         )
-                        if index.startswith(f"seaas-{write_alias}")
+                        if index.startswith(f"seaas-{monthly_alias}")
                     ]
                     if not indices:
                         return failure(
