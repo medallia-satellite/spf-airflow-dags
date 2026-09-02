@@ -219,6 +219,12 @@ def reconcile_monthly_indices_dag():
         fixed >> t
         return t
 
+    @task
+    def report(contexts: List[Context], stage: str) -> None:
+        for i, c in enumerate(contexts):
+            if c["value"] and c["stage"] == stage:
+                logging.info(f"{i}: {c['tenant']}\n{c['value']}")
+
     @task_group
     def monthly_indices(upstream: List[Context]) -> List[Context]:
         stage = "monthly_indices"
@@ -270,14 +276,8 @@ def reconcile_monthly_indices_dag():
 
             return success(context=context, stage=stage, value=missing)
 
-        @task
-        def report(contexts: List[Context]) -> None:
-            for i, c in enumerate(contexts):
-                if c["value"] and c["stage"] == stage:
-                    logging.info(f"{i}: {c['tenant']}\n{c['value']}")
-
         r = reconcile.expand(context=upstream)
-        report(r)
+        report(r, stage=stage)
 
         return r
 
@@ -413,14 +413,9 @@ def reconcile_monthly_indices_dag():
                 value=actions,
             )
 
-        @task
-        def report(contexts: List[Context]) -> None:
-            for i, c in enumerate(contexts):
-                if c["value"] and c["stage"] == stage:
-                    logging.info(f"{i}: {c['tenant']}\n{c['value']}")
 
         r = reconcile.expand(context=upstream)
-        report(r)
+        report(r, stage=stage)
 
         return r
 
