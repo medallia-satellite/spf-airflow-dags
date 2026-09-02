@@ -298,41 +298,107 @@ def reconcile_monthly_indices_dag():
             tenant = context["tenant"]
             actions = []
 
-            read_alias = [r["index"] for r in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}")]
+            read_alias = [
+                r["index"] for r in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}")
+            ]
 
             write_alias = defaultdict(list)
             for resp in fetch_aliases(conn_id, f"/_cat/aliases/{tenant}-20*"):
-                write_alias[resp["alias"]].append((resp["index"], resp["is_write_index"]))
+                write_alias[resp["alias"]].append(
+                    (resp["index"], resp["is_write_index"])
+                )
 
             for monthly_alias in generate_write_aliases(
-                    context["tenant"], context["retention"]
+                context["tenant"], context["retention"]
             ):
                 if monthly_alias not in write_alias:
+                    indices = [
+                        index
+                        for index in xcom_pull(
+                            "fetch_indices_per_tenant", context["tenant"]
+                        )
+                        if index.startswith(f"seaas-{write_alias}")
+                    ]
+                    if not indices:
+                        return failure(
+                            context=context,
+                            stage=stage,
+                            error=f"Missing index for {monthly_alias}",
+                        )
+                    latest_index = indices[-1]
+                    actions.append(
+                        {
+                            "add": {
+                                "index": latest_index,
+                                "alias": monthly_alias,
+                                "is_write_index": True,
+                            }
+                        }
+                    )
+                    if not latest_index in read_alias:
+                        actions.append(
+                            {
+                                "add": {
+                                    "index": latest_index,
+                                    "alias": tenant,
+                                    "is_write_index": False,
+                                }
+                            }
+                        )
                     continue
 
-                if not any(is_write_index == "true" for _, is_write_index in write_alias.get(monthly_alias)):
+                if not any(
+                    is_write_index == "true"
+                    for _, is_write_index in write_alias.get(monthly_alias)
+                ):
                     latest_index = write_alias.get(monthly_alias)[-1][0]
-                    actions.append({
-                        "add": {"index": latest_index, "alias": monthly_alias, "is_write_index": True}
-                    })
+                    actions.append(
+                        {
+                            "add": {
+                                "index": latest_index,
+                                "alias": monthly_alias,
+                                "is_write_index": True,
+                            }
+                        }
+                    )
 
                 for index, _ in write_alias.get(monthly_alias):
                     if not index in read_alias:
-                        actions.append({
-                            "add": {"index": index, "alias": tenant, "is_write_index": False}
-                        })
+                        actions.append(
+                            {
+                                "add": {
+                                    "index": index,
+                                    "alias": tenant,
+                                    "is_write_index": False,
+                                }
+                            }
+                        )
 
             rollover = fetch_aliases(conn_id, f"/_cat/aliases/{tenant}-rollover")[-1]
             if not rollover["is_write_index"] == "true":
-                actions.append({
-                    "add": {"index": f"seaas-{tenant}-*", "alias": f"{tenant}-rollover", "is_write_index": False}
-                })
-                actions.append({
-                    "add": {"index": rollover["index"], "alias": f"{tenant}-rollover", "is_write_index": True}
-                })
+                actions.append(
+                    {
+                        "add": {
+                            "index": f"seaas-{tenant}-*",
+                            "alias": f"{tenant}-rollover",
+                            "is_write_index": False,
+                        }
+                    }
+                )
+                actions.append(
+                    {
+                        "add": {
+                            "index": rollover["index"],
+                            "alias": f"{tenant}-rollover",
+                            "is_write_index": True,
+                        }
+                    }
+                )
 
             if actions and not dry_run:
-                response = http_hook_post(conn_id, "/_aliases/", json.dumps({"actions": actions}))
+                response = http_hook_post(
+                    conn_id, "/_aliases/", json.dumps({"actions": actions})
+                )
                 print(f"Response:\n{json.dumps(response, indent=2)}")
 
             return success(
