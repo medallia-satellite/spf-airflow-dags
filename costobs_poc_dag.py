@@ -14,7 +14,10 @@ MEMORY_FIELDS = [
     ("request_cache", "memory_size_in_bytes"),
 ]
 
-"""Per-index CPU, memory, and storage from GET /_stats."""
+"""Per-index CPU, memory, and storage from GET /_stats.
+cpu_ms is cumulative since the shards started, so it reflects the total so far, not the time spent in the last run.
+"""
+
 def summarize(stats_response: dict) -> dict:
     out = {}
     for index, s in stats_response["indices"].items():
@@ -43,10 +46,12 @@ def costobs_poc_dag():
     def task_a() -> List[Dict[str, Any]]:
         hook_get = HttpHook(method="GET", http_conn_id="sharedservices-elasticsearch")
         response = hook_get.run(
-            endpoint="/seaas-system*/_stats",
+            endpoint="/_all/_stats",
         )
         hook_get.check_response(response)
-        return summarize(response.json())
+        summary = summarize(response.json())
+        print(sum(m['memory_bytes'] for m in summary.values()))
+        return summary
 
     task_a()
 
