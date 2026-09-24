@@ -17,7 +17,7 @@ def costobs_poc_dag():
     def task_a() -> List[Dict[str, Any]]:
         hook_get = HttpHook(method="GET", http_conn_id="sharedservices-elasticsearch")
         response = hook_get.run(
-            endpoint="/seaas-system-*/_stats",
+            endpoint="/seaas-system*/_stats",
         )
         hook_get.check_response(response)
         return response.json()
