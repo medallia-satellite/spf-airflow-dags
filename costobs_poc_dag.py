@@ -50,7 +50,9 @@ def costobs_poc_dag():
         )
         hook_get.check_response(response)
         summary = summarize(response.json())
+        print(sum(m['cpu_ms'] for m in summary.values()))
         print(sum(m['memory_bytes'] for m in summary.values()))
+        print(sum(m['storage_bytes'] for m in summary.values()))
         return summary
 
     task_a()
