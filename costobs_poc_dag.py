@@ -22,4 +22,6 @@ def costobs_poc_dag():
         hook_get.check_response(response)
         return response.json()
 
+    task_a()
+
 costobs_poc_dag()
