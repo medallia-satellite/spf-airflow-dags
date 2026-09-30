@@ -49,7 +49,7 @@ def costobs_poc_dag():
     def task_a():
         conn = BaseHook.get_connection("sharedservices-elasticsearch")  # your conn id
 
-        hook = ElasticsearchPythonHook(hosts=[conn.host], es_conn_args=conn.extra_dejson)
+        hook = ElasticsearchPythonHook(hosts=[f'{conn.schema}://{conn.host}:{conn.port}'], es_conn_args=conn.extra_dejson)
         es = hook.get_conn
         stats = es.indices.stats(index="_all")
         print(stats)
