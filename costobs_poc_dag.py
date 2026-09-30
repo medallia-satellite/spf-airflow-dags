@@ -3,8 +3,10 @@ from typing import Any, Dict, List
 
 from airflow.decorators import dag, task
 from airflow.hooks.base import BaseHook
+from airflow.providers.common.sql.hooks.handlers import fetch_all_handler
 from airflow.providers.http.hooks.http import HttpHook
 from airflow.providers.elasticsearch.hooks.elasticsearch import ElasticsearchPythonHook, ElasticsearchSQLHook
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
 
 MEMORY_FIELDS = [
@@ -53,6 +55,7 @@ def costobs_poc_dag():
         es = hook.get_conn
 
         stats = es.indices.stats(index="_all", filter_path="indices.*.total")
+
         summary = summarize(stats)
         # hook_get = HttpHook(method="GET", http_conn_id="sharedservices-elasticsearch")
         # response = hook_get.run(
@@ -65,6 +68,14 @@ def costobs_poc_dag():
         # print(sum(m['storage_bytes'] for m in summary.values()))
         return summary
 
-    task_a()
+    CLICKHOUSE_CONN_ID = "sharedservices-clickhouse-spf-test"
+    CLICKHOUSE_TABLE = "es_index_stats_hourly"
+    read_rows = SQLExecuteQueryOperator(
+        task_id="read_rows",
+        conn_id=CLICKHOUSE_CONN_ID,
+        sql=f"SELECT * FROM {CLICKHOUSE_TABLE} LIMIT 100",
+        handler=fetch_all_handler,
+    )
+    task_a() >> read_rows
 
 costobs_poc_dag()
