@@ -8,11 +8,9 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
-from airflow.decorators import dag, task
-from airflow.hooks.base import BaseHook
+from airflow.decorators import dag
 from airflow.providers.common.sql.hooks.handlers import fetch_all_handler
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
-from airflow.providers.elasticsearch.hooks.elasticsearch import ElasticsearchPythonHook
 from airflow.providers.http.operators.http import HttpOperator
 
 log = logging.getLogger(__name__)
@@ -61,6 +59,14 @@ def summarize(stats_response: dict) -> Dict[str, Dict[str, int]]:
             "memory_bytes": total(t, MEMORY_FIELDS),
             "storage_bytes": total(t, STORAGE_FIELDS),
         }
+
+    log.info(
+        "Collected stats for %d indices: cpu_ms=%d memory_bytes=%d storage_bytes=%d",
+        len(out),
+        sum(m["cpu_ms"] for m in out.values()),
+        sum(m["memory_bytes"] for m in out.values()),
+        sum(m["storage_bytes"] for m in out.values()),
+    )
     return out
 
 
@@ -105,23 +111,15 @@ def parse_tenant_mapping(response: dict) -> List[Dict[str, Any]]:
     render_template_as_native_obj=True,
 )
 def costobs_poc_dag():
-    @task
-    def collect_es_index_stats() -> Dict[str, Dict[str, int]]:
-        conn = BaseHook.get_connection(ES_CONN_ID)
-        host = f"{conn.schema}://{conn.host}" + (f":{conn.port}" if conn.port else "")
-        es = ElasticsearchPythonHook(hosts=[host], es_conn_args=conn.extra_dejson).get_conn
-
-        stats = es.indices.stats(index="_all", filter_path="indices.*.total")
-        summary = summarize(stats)
-
-        log.info(
-            "Collected stats for %d indices: cpu_ms=%d memory_bytes=%d storage_bytes=%d",
-            len(summary),
-            sum(m["cpu_ms"] for m in summary.values()),
-            sum(m["memory_bytes"] for m in summary.values()),
-            sum(m["storage_bytes"] for m in summary.values()),
-        )
-        return summary
+    collect_es_index_stats = HttpOperator(
+        task_id="collect_es_index_stats",
+        http_conn_id=ES_CONN_ID,
+        method="GET",
+        endpoint="/_all/_stats",
+        data={"filter_path": "indices.*.total"},
+        headers={"Accept": "application/json"},
+        response_filter=lambda response: summarize(response.json()),
+    )
 
     fetch_tenant_registry_instances = HttpOperator(
         task_id="fetch_tenant_registry_instances",
@@ -139,7 +137,7 @@ def costobs_poc_dag():
         handler=fetch_all_handler,
     )
 
-    collect_es_index_stats() >> read_rows >> fetch_tenant_registry_instances
+    collect_es_index_stats >> read_rows >> fetch_tenant_registry_instances
 
 
 costobs_poc_dag()
