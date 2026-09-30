@@ -19,7 +19,6 @@ log = logging.getLogger(__name__)
 
 ES_CONN_ID = "sharedservices-elasticsearch"
 CH_CONN_ID = "sharedservices-clickhouse-spf-test"
-# HTTP connection with host https://tenant-registry.eng.medallia.com
 TENANT_REGISTRY_CONN_ID = "tenant-registry"
 EXPRESS_APPLICATION_ID = "com.medallia.express"
 
@@ -136,7 +135,7 @@ def costobs_poc_dag():
     read_rows = SQLExecuteQueryOperator(
         task_id="read_rows",
         conn_id=CH_CONN_ID,
-        sql="SELECT * FROM tenant_mapping",
+        sql="SELECT * FROM es_index_stats_hourly",
         handler=fetch_all_handler,
     )
 
