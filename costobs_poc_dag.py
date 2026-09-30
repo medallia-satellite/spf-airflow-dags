@@ -53,7 +53,7 @@ def costobs_poc_dag():
         es = hook.get_conn
 
         stats = es.indices.stats(index="_all", filter_path="indices.*.total")
-        print(stats)
+        summary = summarize(stats)
         # hook_get = HttpHook(method="GET", http_conn_id="sharedservices-elasticsearch")
         # response = hook_get.run(
         #     endpoint="/_all/_stats",
@@ -63,7 +63,7 @@ def costobs_poc_dag():
         # print(sum(m['cpu_ms'] for m in summary.values()))
         # print(sum(m['memory_bytes'] for m in summary.values()))
         # print(sum(m['storage_bytes'] for m in summary.values()))
-        # return summary
+        return summary
 
     task_a()
 
