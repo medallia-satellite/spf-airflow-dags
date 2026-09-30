@@ -2,7 +2,10 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from airflow.decorators import dag, task
+from airflow.hooks.base import BaseHook
 from airflow.providers.http.hooks.http import HttpHook
+from airflow.providers.elasticsearch.hooks.elasticsearch import ElasticsearchPythonHook, ElasticsearchSQLHook
+
 
 MEMORY_FIELDS = [
     ("segments", "memory_in_bytes"),
@@ -43,17 +46,23 @@ def summarize(stats_response: dict) -> dict:
 )
 def costobs_poc_dag():
     @task
-    def task_a() -> List[Dict[str, Any]]:
-        hook_get = HttpHook(method="GET", http_conn_id="sharedservices-elasticsearch")
-        response = hook_get.run(
-            endpoint="/_all/_stats",
-        )
-        hook_get.check_response(response)
-        summary = summarize(response.json())
-        print(sum(m['cpu_ms'] for m in summary.values()))
-        print(sum(m['memory_bytes'] for m in summary.values()))
-        print(sum(m['storage_bytes'] for m in summary.values()))
-        return summary
+    def task_a():
+        conn = BaseHook.get_connection("sharedservices-elasticsearch")  # your conn id
+
+        hook = ElasticsearchPythonHook(hosts=[conn.host], es_conn_args=conn.extra_dejson)
+        es = hook.get_conn
+        stats = es.indices.stats(index="_all")
+        print(stats)
+        # hook_get = HttpHook(method="GET", http_conn_id="sharedservices-elasticsearch")
+        # response = hook_get.run(
+        #     endpoint="/_all/_stats",
+        # )
+        # hook_get.check_response(response)
+        # summary = summarize(response.json())
+        # print(sum(m['cpu_ms'] for m in summary.values()))
+        # print(sum(m['memory_bytes'] for m in summary.values()))
+        # print(sum(m['storage_bytes'] for m in summary.values()))
+        # return summary
 
     task_a()
 
