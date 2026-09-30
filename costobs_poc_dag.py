@@ -52,7 +52,7 @@ def costobs_poc_dag():
         hook = ElasticsearchPythonHook(hosts=[f'{conn.schema}://{conn.host}:{conn.port}'], es_conn_args=conn.extra_dejson)
         es = hook.get_conn
 
-        stats = es.indices.stats(index="_all")
+        stats = es.indices.stats(index="_all", filter_path="indices.*.total")
         print(stats)
         # hook_get = HttpHook(method="GET", http_conn_id="sharedservices-elasticsearch")
         # response = hook_get.run(
