@@ -1,23 +1,27 @@
 """Cost Observability POC.
 
 Collects per-index CPU, memory, and storage figures from Elasticsearch ``GET /_stats``
-and fetches the tenant mapping from ClickHouse.
+fetches the tenant mapping from ClickHouse, and pulls the instance list from Tenant Registry.
 """
 
 import logging
 from datetime import datetime
-from typing import Dict
+from typing import Any, Dict, List
 
 from airflow.decorators import dag, task
 from airflow.hooks.base import BaseHook
 from airflow.providers.common.sql.hooks.handlers import fetch_all_handler
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.elasticsearch.hooks.elasticsearch import ElasticsearchPythonHook
+from airflow.providers.http.operators.http import HttpOperator
 
 log = logging.getLogger(__name__)
 
 ES_CONN_ID = "sharedservices-elasticsearch"
 CH_CONN_ID = "sharedservices-clickhouse-spf-test"
+# HTTP connection with host https://tenant-registry.eng.medallia.com
+TENANT_REGISTRY_CONN_ID = "tenant-registry"
+EXPRESS_APPLICATION_ID = "com.medallia.express"
 
 CPU_FIELDS = [
     ("search", "query_time_in_millis"),
@@ -61,6 +65,36 @@ def summarize(stats_response: dict) -> Dict[str, Dict[str, int]]:
     return out
 
 
+def parse_tenant_mapping(response: dict) -> List[Dict[str, Any]]:
+    """Map each tenant to its instance from a Tenant Registry ``GET /api/v0/instances`` response.
+
+    The top-level ``tenant_id`` of an item is the instance id; the item's ``tenants`` list
+    holds the actual tenants, each with its own ``tenant_id`` and ``in_app_id``.
+    Only Express instances are included.
+    Returns one row per tenant: ``{"instance_id", "in_app_id", "tenant_id"}``.
+    """
+    items = response.get("items", [])
+    if response.get("_total", len(items)) != len(items):
+        log.warning("Tenant Registry returned %d of %d instances", len(items), response["_total"])
+
+    mapping = [
+        {
+            "instance_id": instance["tenant_id"],
+            "in_app_id": tenant.get("in_app_id"),
+            "tenant_id": tenant["tenant_id"],
+        }
+        for instance in items
+        if instance.get("application_id") == EXPRESS_APPLICATION_ID
+        for tenant in instance.get("tenants", [])
+    ]
+    log.info(
+        "Mapped %d tenants across %d Express instances",
+        len(mapping),
+        len({m["instance_id"] for m in mapping}),
+    )
+    return mapping
+
+
 @dag(
     dag_display_name="Cost Observability POC",
     tags=["spf", "elasticsearch", "clickhouse", "cost-observability"],
@@ -90,6 +124,15 @@ def costobs_poc_dag():
         )
         return summary
 
+    fetch_tenant_registry_instances = HttpOperator(
+        task_id="fetch_tenant_registry_instances",
+        http_conn_id=TENANT_REGISTRY_CONN_ID,
+        method="GET",
+        endpoint="/api/v0/instances",
+        headers={"Accept": "application/json"},
+        response_filter=lambda response: parse_tenant_mapping(response.json()),
+    )
+
     read_rows = SQLExecuteQueryOperator(
         task_id="read_rows",
         conn_id=CH_CONN_ID,
@@ -97,7 +140,7 @@ def costobs_poc_dag():
         handler=fetch_all_handler,
     )
 
-    collect_es_index_stats() >> read_rows
+    collect_es_index_stats() >> read_rows >> fetch_tenant_registry_instances
 
 
 costobs_poc_dag()
