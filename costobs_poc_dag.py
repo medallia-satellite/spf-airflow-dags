@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 
 ES_CONN_ID = "sharedservices-elasticsearch"
 CH_CONN_ID = "sharedservices-clickhouse-spf-test"
-CH_TABLE = "es_index_stats_hourly"
+CH_TABLE = "elasticsearch_index_stats_hourly"
 CH_COLUMNS = [
     "ts",
     "dc",
