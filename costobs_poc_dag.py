@@ -5,10 +5,11 @@ fetches the tenant mapping from ClickHouse, and pulls the instance list from Ten
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List
 
-from airflow.decorators import dag
+from airflow.decorators import dag, task
 from airflow.providers.common.sql.hooks.handlers import fetch_all_handler
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.http.operators.http import HttpOperator
@@ -19,6 +20,13 @@ ES_CONN_ID = "sharedservices-elasticsearch"
 CH_CONN_ID = "sharedservices-clickhouse-spf-test"
 TENANT_REGISTRY_CONN_ID = "tenant-registry"
 EXPRESS_APPLICATION_ID = "com.medallia.express"
+
+# seaas-<in_app_id>_topic-builder-...-<in_app_id>[-YYYY-MM-DD]-<instance_id>-<suffix>
+# Same shape as fix_and_verify.INDEX_PATTERN, but the month is optional.
+INDEX_REGEX = re.compile(
+    r"^seaas-(?P<in_app_id>\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-(?P=in_app_id)"
+    r"(-(?P<month>[0-9]{4}-[0-9]{2}-[0-9]{2}))?-(?P<instance_id>[0-9]+)-(?P<suffix>[0-9]+)$"
+)
 
 CPU_FIELDS = [
     ("search", "query_time_in_millis"),
@@ -100,6 +108,39 @@ def parse_tenant_mapping(response: dict) -> List[Dict[str, Any]]:
     return mapping
 
 
+def map_indices(
+    index_stats: Dict[str, Dict[str, int]], tenant_mapping: List[Dict[str, Any]]
+) -> Dict[str, Dict[str, Any]]:
+    """Attach ``instance_id``, ``in_app_id`` and ``tenant_id`` to each index's stats.
+
+    Indices that don't match ``INDEX_REGEX`` or aren't in the tenant mapping are left out and counted in the log.
+    """
+    tenant_by_instance_app = {(r["instance_id"], r["in_app_id"]): r["tenant_id"] for r in tenant_mapping}
+
+    out = {}
+    unparsed = unmapped = 0
+    for index, stats in index_stats.items():
+        match = INDEX_REGEX.fullmatch(index)
+        if not match:
+            unparsed += 1
+            continue
+        instance_id, in_app_id = int(match["instance_id"]), match["in_app_id"]
+        tenant_id = tenant_by_instance_app.get((instance_id, in_app_id))
+        if tenant_id is None:
+            unmapped += 1
+            continue
+        out[index] = {**stats, "instance_id": instance_id, "in_app_id": in_app_id, "tenant_id": tenant_id}
+
+    log.info(
+        "Mapped %d of %d indices to tenants (%d unparsed, %d not in Tenant Registry)",
+        len(out),
+        len(index_stats),
+        unparsed,
+        unmapped,
+    )
+    return out
+
+
 @dag(
     dag_display_name="Cost Observability POC",
     tags=["spf", "elasticsearch", "clickhouse", "cost-observability"],
@@ -137,7 +178,14 @@ def costobs_poc_dag():
         handler=fetch_all_handler,
     )
 
+    @task
+    def map_indices_to_tenants(
+        index_stats: Dict[str, Dict[str, int]], tenant_mapping: List[Dict[str, Any]]
+    ) -> Dict[str, Dict[str, Any]]:
+        return map_indices(index_stats, tenant_mapping)
+
     collect_es_index_stats >> read_rows >> fetch_tenant_registry_instances
+    map_indices_to_tenants(collect_es_index_stats.output, fetch_tenant_registry_instances.output)
 
 
 costobs_poc_dag()
