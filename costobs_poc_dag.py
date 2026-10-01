@@ -18,7 +18,7 @@ Connections: ``sharedservices-elasticsearch``, ``sharedservices-clickhouse-spf-t
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from airflow.decorators import dag, task
 from airflow.providers.common.sql.hooks.handlers import fetch_all_handler
@@ -32,12 +32,18 @@ CH_CONN_ID = "sharedservices-clickhouse-spf-test"
 TENANT_REGISTRY_CONN_ID = "tenant-registry"
 TENANT_REGISTRY_ENDPOINT = "/api/v0/applications/id/com.medallia.express/instances/"
 
-# seaas-<in_app_id>_topic-builder-...-<in_app_id>[-YYYY-MM-DD]-<instance_id>-<suffix>
-# Same shape as fix_and_verify.INDEX_PATTERN, but the month is optional.
-SEAAS_INDEX_REGEX = re.compile(
-    r"^seaas-(?P<in_app_id>\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-(?P=in_app_id)"
-    r"(-(?P<month>[0-9]{4}-[0-9]{2}-[0-9]{2}))?-(?P<instance_id>[0-9]+)-(?P<suffix>[0-9]+)$"
-)
+# Tenant index names, tried in order:
+#   seaas-<in_app_id>_topic-builder-...-<in_app_id>-YYYY-MM-DD-<instance_id>-<suffix>  (fix_and_verify.INDEX_PATTERN)
+#   seaas-<in_app_id>_surveys-...-<in_app_id>-<instance_id>-<suffix>
+_INDEX_BODY = r"(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-(?P=in_app_id)"
+_INDEX_TAIL = r"-(?P<instance_id>[0-9]+)-(?P<suffix>[0-9]+)$"
+SEAAS_INDEX_REGEXES = [
+    re.compile(
+        r"^seaas-(?P<in_app_id>\w+)_topic-builder" + _INDEX_BODY
+        + r"-(?P<month>[0-9]{4}-[0-9]{2}-[0-9]{2})" + _INDEX_TAIL
+    ),
+    re.compile(r"^seaas-(?P<in_app_id>\w+)_surveys" + _INDEX_BODY + _INDEX_TAIL),
+]
 
 # (section, field) pairs from the ``total`` block of ``GET /_stats``, added up per metric.
 CPU_FIELDS = [
@@ -118,12 +124,17 @@ def parse_tenant_mapping(instances_response: dict) -> List[Dict[str, Any]]:
     return tenant_mapping
 
 
+def parse_index_name(index: str) -> Optional[re.Match]:
+    """Return the first ``SEAAS_INDEX_REGEXES`` match for ``index``, or None."""
+    return next((m for m in (r.fullmatch(index) for r in SEAAS_INDEX_REGEXES) if m), None)
+
+
 def attach_tenants(
     index_stats: Dict[str, Dict[str, int]], tenant_mapping: List[Dict[str, Any]]
 ) -> Dict[str, Dict[str, Any]]:
     """Add ``instance_id``, ``in_app_id`` and ``tenant_id`` to each index's stats.
 
-    ``instance_id`` and ``in_app_id`` are parsed from the index name with ``SEAAS_INDEX_REGEX``;
+    ``instance_id`` and ``in_app_id`` are parsed from the index name with ``SEAAS_INDEX_REGEXES``;
     ``tenant_id`` is looked up in ``tenant_mapping``. Indices whose name doesn't match, or whose
     ``(instance_id, in_app_id)`` isn't in the mapping, are left out and counted in the log.
     Each one gets a warning, except non-``seaas-`` indices (system indices like ``.kibana``),
@@ -139,9 +150,9 @@ def attach_tenants(
         if not index.startswith("seaas-"):
             non_seaas_count += 1
             continue
-        match = SEAAS_INDEX_REGEX.fullmatch(index)
+        match = parse_index_name(index)
         if not match:
-            log.warning("Cannot map %s: name doesn't match the seaas index pattern", index)
+            log.warning("Cannot map %s: name doesn't match any seaas index pattern", index)
             unparsed_count += 1
             continue
         instance_id, in_app_id = int(match["instance_id"]), match["in_app_id"]
