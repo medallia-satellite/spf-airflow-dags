@@ -3,16 +3,22 @@
 Attributes Elasticsearch resource usage to tenants. Tasks:
 
 - ``collect_es_index_stats``: ``GET /_all/_stats`` on Elasticsearch, reduced to
-  ``cpu_ms``, ``memory_bytes`` and ``storage_bytes`` per index.
+  ``docs_count``, ``cpu_ms``, ``memory_bytes`` and ``storage_bytes`` per index.
 - ``read_es_index_stats_hourly``: reads the ``es_index_stats_hourly`` table from ClickHouse.
 - ``fetch_tenant_mapping``: lists Express instances from Tenant Registry
   (``GET /api/v0/applications/id/com.medallia.express/instances/``), reduced to one
   ``{instance_id, in_app_id, tenant_id}`` row per tenant.
 - ``map_indices_to_tenants``: parses ``instance_id`` and ``in_app_id`` from each index name
   and looks up the ``tenant_id``.
+- ``insert_es_index_stats_hourly``: writes one row per index to ClickHouse
+  ``es_index_stats_hourly``, with ``ts`` set to the run's ``data_interval_end``.
+  Indices without a tenant are written with ``tenant_id = 0``.
 
-Connections: ``sharedservices-elasticsearch``, ``sharedservices-clickhouse-spf-test`` and
-``tenant-registry`` (HTTP, host ``https://tenant-registry.eng.medallia.com``, no auth).
+Params ``dc`` and ``namespace`` describe where the ``sharedservices-elasticsearch`` cluster runs
+and are written to the matching columns.
+
+Connections: ``sharedservices-elasticsearch``, ``sharedservices-clickhouse-spf-test`` (ClickHouse)
+and ``tenant-registry`` (HTTP, host ``https://tenant-registry.eng.medallia.com``, no auth).
 """
 
 import logging
@@ -21,6 +27,8 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from airflow.decorators import dag, task
+from airflow.models import Param
+from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
 from airflow.providers.common.sql.hooks.handlers import fetch_all_handler
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.http.operators.http import HttpOperator
@@ -29,6 +37,20 @@ log = logging.getLogger(__name__)
 
 ES_CONN_ID = "sharedservices-elasticsearch"
 CH_CONN_ID = "sharedservices-clickhouse-spf-test"
+CH_TABLE = "es_index_stats_hourly"
+CH_COLUMNS = [
+    "ts",
+    "dc",
+    "namespace",
+    "index_name",
+    "total_docs_count",
+    "cpu_ms_cumulative",
+    "total_mem_bytes",
+    "total_store_bytes",
+    "tenant_id",
+]
+# tenant_id is part of the table's primary key, so it can't be NULL; 0 marks unattributed indices.
+UNATTRIBUTED_TENANT_ID = 0
 TENANT_REGISTRY_CONN_ID = "tenant-registry"
 TENANT_REGISTRY_ENDPOINT = "/api/v0/applications/id/com.medallia.express/instances/"
 
@@ -60,7 +82,7 @@ STORAGE_FIELDS = [
 
 
 def summarize_index_stats(stats_response: dict) -> Dict[str, Dict[str, int]]:
-    """Reduce a ``GET /_stats`` response to cpu_ms, memory_bytes and storage_bytes per index.
+    """Reduce a ``GET /_stats`` response to docs_count, cpu_ms, memory_bytes and storage_bytes per index.
 
     Uses the ``total`` section, so primaries and replicas are both counted.
     cpu_ms is the time spent on search and indexing, added up since the shards started.
@@ -74,6 +96,7 @@ def summarize_index_stats(stats_response: dict) -> Dict[str, Dict[str, int]]:
     for index, stats in stats_response.get("indices", {}).items():
         totals = stats.get("total", {})
         index_stats[index] = {
+            "docs_count": totals.get("docs", {}).get("count", 0),
             "cpu_ms": sum_fields(totals, CPU_FIELDS),
             "memory_bytes": sum_fields(totals, MEMORY_FIELDS),
             "storage_bytes": sum_fields(totals, STORAGE_FIELDS),
@@ -175,6 +198,26 @@ def attach_tenants(
     return tenant_index_stats
 
 
+def build_ch_rows(
+    tenant_index_stats: Dict[str, Dict[str, Any]], ts: datetime, dc: str, namespace: str
+) -> List[tuple]:
+    """Turn ``attach_tenants`` output into ``es_index_stats_hourly`` rows, in ``CH_COLUMNS`` order."""
+    return [
+        (
+            ts,
+            dc,
+            namespace,
+            index,
+            stats["docs_count"],
+            stats["cpu_ms"],
+            stats["memory_bytes"],
+            stats["storage_bytes"],
+            stats["tenant_id"] if stats["tenant_id"] is not None else UNATTRIBUTED_TENANT_ID,
+        )
+        for index, stats in tenant_index_stats.items()
+    ]
+
+
 @dag(
     dag_display_name="Cost Observability POC",
     tags=["spf", "elasticsearch", "clickhouse", "cost-observability"],
@@ -185,6 +228,11 @@ def attach_tenants(
     schedule="@daily",
     catchup=False,
     render_template_as_native_obj=True,
+    params={
+        # Where ES_CONN_ID runs.
+        "dc": Param("<dc>", type="string"),
+        "namespace": Param("<namespace>", type="string"),
+    },
 )
 def costobs_poc_dag():
     @task
@@ -203,6 +251,15 @@ def costobs_poc_dag():
         response_filter=lambda response: summarize_index_stats(response.json()),
     )
 
+    @task
+    def insert_es_index_stats_hourly(
+        tenant_index_stats: Dict[str, Dict[str, Any]], data_interval_end=None, params=None
+    ) -> int:
+        rows = build_ch_rows(tenant_index_stats, data_interval_end, params["dc"], params["namespace"])
+        ClickHouseHook(clickhouse_conn_id=CH_CONN_ID).bulk_insert_rows(CH_TABLE, rows, column_names=CH_COLUMNS)
+        log.info("Wrote ts=%s dc=%s namespace=%s", data_interval_end, params["dc"], params["namespace"])
+        return len(rows)
+
     fetch_tenant_mapping = HttpOperator(
         task_id="fetch_tenant_mapping",
         http_conn_id=TENANT_REGISTRY_CONN_ID,
@@ -215,12 +272,12 @@ def costobs_poc_dag():
     read_es_index_stats_hourly = SQLExecuteQueryOperator(
         task_id="read_es_index_stats_hourly",
         conn_id=CH_CONN_ID,
-        sql="SELECT * FROM es_index_stats_hourly",
+        sql=f"SELECT * FROM {CH_TABLE}",
         handler=fetch_all_handler,
     )
 
-
-    map_indices_to_tenants(collect_es_index_stats.output, fetch_tenant_mapping.output)
+    tenant_index_stats = map_indices_to_tenants(collect_es_index_stats.output, fetch_tenant_mapping.output)
+    insert_es_index_stats_hourly(tenant_index_stats)
 
 
 costobs_poc_dag()
