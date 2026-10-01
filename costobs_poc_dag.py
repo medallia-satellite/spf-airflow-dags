@@ -1,7 +1,18 @@
 """Cost Observability POC.
 
-Collects per-index CPU, memory, and storage figures from Elasticsearch ``GET /_stats``
-fetches the tenant mapping from ClickHouse, and pulls the instance list from Tenant Registry.
+Attributes Elasticsearch resource usage to tenants. Tasks:
+
+- ``collect_es_index_stats``: ``GET /_all/_stats`` on Elasticsearch, reduced to
+  ``cpu_ms``, ``memory_bytes`` and ``storage_bytes`` per index.
+- ``read_es_index_stats_hourly``: reads the ``es_index_stats_hourly`` table from ClickHouse.
+- ``fetch_tenant_mapping``: lists Express instances from Tenant Registry
+  (``GET /api/v0/applications/id/com.medallia.express/instances/``), reduced to one
+  ``{instance_id, in_app_id, tenant_id}`` row per tenant.
+- ``map_indices_to_tenants``: parses ``instance_id`` and ``in_app_id`` from each index name
+  and looks up the ``tenant_id``.
+
+Connections: ``sharedservices-elasticsearch``, ``sharedservices-clickhouse-spf-test`` and
+``tenant-registry`` (HTTP, host ``https://tenant-registry.eng.medallia.com``, no auth).
 """
 
 import logging
@@ -19,15 +30,16 @@ log = logging.getLogger(__name__)
 ES_CONN_ID = "sharedservices-elasticsearch"
 CH_CONN_ID = "sharedservices-clickhouse-spf-test"
 TENANT_REGISTRY_CONN_ID = "tenant-registry"
-EXPRESS_APPLICATION_ID = "com.medallia.express"
+TENANT_REGISTRY_ENDPOINT = "/api/v0/applications/id/com.medallia.express/instances/"
 
 # seaas-<in_app_id>_topic-builder-...-<in_app_id>[-YYYY-MM-DD]-<instance_id>-<suffix>
 # Same shape as fix_and_verify.INDEX_PATTERN, but the month is optional.
-INDEX_REGEX = re.compile(
+SEAAS_INDEX_REGEX = re.compile(
     r"^seaas-(?P<in_app_id>\w+)_topic-builder(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-(?P=in_app_id)"
     r"(-(?P<month>[0-9]{4}-[0-9]{2}-[0-9]{2}))?-(?P<instance_id>[0-9]+)-(?P<suffix>[0-9]+)$"
 )
 
+# (section, field) pairs from the ``total`` block of ``GET /_stats``, added up per metric.
 CPU_FIELDS = [
     ("search", "query_time_in_millis"),
     ("search", "fetch_time_in_millis"),
@@ -48,7 +60,7 @@ STORAGE_FIELDS = [
 ]
 
 
-def summarize(stats_response: dict) -> Dict[str, Dict[str, int]]:
+def summarize_index_stats(stats_response: dict) -> Dict[str, Dict[str, int]]:
     """Reduce a ``GET /_stats`` response to cpu_ms, memory_bytes and storage_bytes per index.
 
     Uses the ``total`` section, so primaries and replicas are both counted.
@@ -56,95 +68,116 @@ def summarize(stats_response: dict) -> Dict[str, Dict[str, int]]:
     It is a running total, not the time spent since the last DAG run.
     """
 
-    def total(stats: dict, fields) -> int:
-        return sum(stats.get(section, {}).get(field, 0) for section, field in fields)
+    def sum_fields(totals: dict, fields) -> int:
+        return sum(totals.get(section, {}).get(field, 0) for section, field in fields)
 
-    out = {}
-    for index, s in stats_response.get("indices", {}).items():
-        t = s.get("total", {})
-        out[index] = {
-            "cpu_ms": total(t, CPU_FIELDS),
-            "memory_bytes": total(t, MEMORY_FIELDS),
-            "storage_bytes": total(t, STORAGE_FIELDS),
+    index_stats = {}
+    for index, stats in stats_response.get("indices", {}).items():
+        totals = stats.get("total", {})
+        index_stats[index] = {
+            "cpu_ms": sum_fields(totals, CPU_FIELDS),
+            "memory_bytes": sum_fields(totals, MEMORY_FIELDS),
+            "storage_bytes": sum_fields(totals, STORAGE_FIELDS),
         }
 
     log.info(
         "Collected stats for %d indices: cpu_ms=%d memory_bytes=%d storage_bytes=%d",
-        len(out),
-        sum(m["cpu_ms"] for m in out.values()),
-        sum(m["memory_bytes"] for m in out.values()),
-        sum(m["storage_bytes"] for m in out.values()),
+        len(index_stats),
+        sum(s["cpu_ms"] for s in index_stats.values()),
+        sum(s["memory_bytes"] for s in index_stats.values()),
+        sum(s["storage_bytes"] for s in index_stats.values()),
     )
-    return out
+    return index_stats
 
 
-def parse_tenant_mapping(response: dict) -> List[Dict[str, Any]]:
-    """Map each tenant to its instance from a Tenant Registry ``GET /api/v0/instances`` response.
+def parse_tenant_mapping(instances_response: dict) -> List[Dict[str, Any]]:
+    """Map each tenant to its instance from a Tenant Registry Express instances response.
 
     The top-level ``tenant_id`` of an item is the instance id; the item's ``tenants`` list
     holds the actual tenants, each with its own ``tenant_id`` and ``in_app_id``.
-    Only Express instances are included.
     Returns one row per tenant: ``{"instance_id", "in_app_id", "tenant_id"}``.
     """
-    items = response.get("items", [])
-    if response.get("_total", len(items)) != len(items):
-        log.warning("Tenant Registry returned %d of %d instances", len(items), response["_total"])
+    instances = instances_response.get("items", [])
+    if instances_response.get("_total", len(instances)) != len(instances):
+        log.warning("Tenant Registry returned %d of %d instances", len(instances), instances_response["_total"])
 
-    mapping = [
+    tenant_mapping = [
         {
             "instance_id": instance["tenant_id"],
             "in_app_id": tenant.get("in_app_id"),
             "tenant_id": tenant["tenant_id"],
         }
-        for instance in items
-        if instance.get("application_id") == EXPRESS_APPLICATION_ID
+        for instance in instances
         for tenant in instance.get("tenants", [])
     ]
     log.info(
         "Mapped %d tenants across %d Express instances",
-        len(mapping),
-        len({m["instance_id"] for m in mapping}),
+        len(tenant_mapping),
+        len({row["instance_id"] for row in tenant_mapping}),
     )
-    return mapping
+    return tenant_mapping
 
 
-def map_indices(
+def attach_tenants(
     index_stats: Dict[str, Dict[str, int]], tenant_mapping: List[Dict[str, Any]]
 ) -> Dict[str, Dict[str, Any]]:
-    """Attach ``instance_id``, ``in_app_id`` and ``tenant_id`` to each index's stats.
+    """Add ``instance_id``, ``in_app_id`` and ``tenant_id`` to each index's stats.
 
-    Indices that don't match ``INDEX_REGEX`` or aren't in the tenant mapping are left out and counted in the log.
+    ``instance_id`` and ``in_app_id`` are parsed from the index name with ``SEAAS_INDEX_REGEX``;
+    ``tenant_id`` is looked up in ``tenant_mapping``. Indices whose name doesn't match, or whose
+    ``(instance_id, in_app_id)`` isn't in the mapping, are left out and counted in the log.
+    Each one gets a warning, except non-``seaas-`` indices (system indices like ``.kibana``),
+    which are only counted.
     """
-    tenant_by_instance_app = {(r["instance_id"], r["in_app_id"]): r["tenant_id"] for r in tenant_mapping}
+    tenant_id_by_instance_app = {
+        (row["instance_id"], row["in_app_id"]): row["tenant_id"] for row in tenant_mapping
+    }
 
-    out = {}
-    unparsed = unmapped = 0
+    tenant_index_stats = {}
+    non_seaas_count = unparsed_count = unmapped_count = 0
     for index, stats in index_stats.items():
-        match = INDEX_REGEX.fullmatch(index)
+        if not index.startswith("seaas-"):
+            non_seaas_count += 1
+            continue
+        match = SEAAS_INDEX_REGEX.fullmatch(index)
         if not match:
-            unparsed += 1
+            log.warning("Cannot map %s: name doesn't match the seaas index pattern", index)
+            unparsed_count += 1
             continue
         instance_id, in_app_id = int(match["instance_id"]), match["in_app_id"]
-        tenant_id = tenant_by_instance_app.get((instance_id, in_app_id))
+        tenant_id = tenant_id_by_instance_app.get((instance_id, in_app_id))
         if tenant_id is None:
-            unmapped += 1
+            log.warning(
+                "Cannot map %s: instance_id=%d in_app_id=%s not found in Tenant Registry",
+                index,
+                instance_id,
+                in_app_id,
+            )
+            unmapped_count += 1
             continue
-        out[index] = {**stats, "instance_id": instance_id, "in_app_id": in_app_id, "tenant_id": tenant_id}
+        tenant_index_stats[index] = {
+            **stats,
+            "instance_id": instance_id,
+            "in_app_id": in_app_id,
+            "tenant_id": tenant_id,
+        }
 
     log.info(
-        "Mapped %d of %d indices to tenants (%d unparsed, %d not in Tenant Registry)",
-        len(out),
+        "Mapped %d of %d indices to tenants (%d non-seaas, %d unparsed, %d not in Tenant Registry)",
+        len(tenant_index_stats),
         len(index_stats),
-        unparsed,
-        unmapped,
+        non_seaas_count,
+        unparsed_count,
+        unmapped_count,
     )
-    return out
+    return tenant_index_stats
 
 
 @dag(
     dag_display_name="Cost Observability POC",
     tags=["spf", "elasticsearch", "clickhouse", "cost-observability"],
-    description="POC: collect per-index CPU/memory/storage from Elasticsearch and read ClickHouse index stats.",
+    description="POC: attribute Elasticsearch per-index CPU/memory/storage to tenants via Tenant Registry.",
+    doc_md=__doc__,
     max_active_runs=1,
     start_date=datetime(2026, 1, 1),
     schedule="@daily",
@@ -159,20 +192,20 @@ def costobs_poc_dag():
         endpoint="/_all/_stats",
         data={"filter_path": "indices.*.total"},
         headers={"Accept": "application/json"},
-        response_filter=lambda response: summarize(response.json()),
+        response_filter=lambda response: summarize_index_stats(response.json()),
     )
 
-    fetch_tenant_registry_instances = HttpOperator(
-        task_id="fetch_tenant_registry_instances",
+    fetch_tenant_mapping = HttpOperator(
+        task_id="fetch_tenant_mapping",
         http_conn_id=TENANT_REGISTRY_CONN_ID,
         method="GET",
-        endpoint="/api/v0/instances",
+        endpoint=TENANT_REGISTRY_ENDPOINT,
         headers={"Accept": "application/json"},
         response_filter=lambda response: parse_tenant_mapping(response.json()),
     )
 
-    read_rows = SQLExecuteQueryOperator(
-        task_id="read_rows",
+    read_es_index_stats_hourly = SQLExecuteQueryOperator(
+        task_id="read_es_index_stats_hourly",
         conn_id=CH_CONN_ID,
         sql="SELECT * FROM es_index_stats_hourly",
         handler=fetch_all_handler,
@@ -182,10 +215,12 @@ def costobs_poc_dag():
     def map_indices_to_tenants(
         index_stats: Dict[str, Dict[str, int]], tenant_mapping: List[Dict[str, Any]]
     ) -> Dict[str, Dict[str, Any]]:
-        return map_indices(index_stats, tenant_mapping)
+        return attach_tenants(index_stats, tenant_mapping)
 
-    collect_es_index_stats >> read_rows >> fetch_tenant_registry_instances
-    map_indices_to_tenants(collect_es_index_stats.output, fetch_tenant_registry_instances.output)
+    fetch_tenant_mapping
+    read_es_index_stats_hourly
+    collect_es_index_stats
+    map_indices_to_tenants(collect_es_index_stats.output, fetch_tenant_mapping.output)
 
 
 costobs_poc_dag()
