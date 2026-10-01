@@ -185,6 +185,12 @@ def attach_tenants(
     render_template_as_native_obj=True,
 )
 def costobs_poc_dag():
+    @task
+    def map_indices_to_tenants(
+        index_stats: Dict[str, Dict[str, int]], tenant_mapping: List[Dict[str, Any]]
+    ) -> Dict[str, Dict[str, Any]]:
+        return attach_tenants(index_stats, tenant_mapping)
+
     collect_es_index_stats = HttpOperator(
         task_id="collect_es_index_stats",
         http_conn_id=ES_CONN_ID,
@@ -211,15 +217,7 @@ def costobs_poc_dag():
         handler=fetch_all_handler,
     )
 
-    @task
-    def map_indices_to_tenants(
-        index_stats: Dict[str, Dict[str, int]], tenant_mapping: List[Dict[str, Any]]
-    ) -> Dict[str, Dict[str, Any]]:
-        return attach_tenants(index_stats, tenant_mapping)
 
-    fetch_tenant_mapping
-    read_es_index_stats_hourly
-    collect_es_index_stats
     map_indices_to_tenants(collect_es_index_stats.output, fetch_tenant_mapping.output)
 
 
