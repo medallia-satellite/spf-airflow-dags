@@ -35,10 +35,10 @@ from airflow.providers.http.operators.http import HttpOperator
 
 log = logging.getLogger(__name__)
 
-ES_CONN_ID = "sharedservices-elasticsearch"
-CH_CONN_ID = "sharedservices-clickhouse-spf-test"
-CH_TABLE = "elasticsearch_index_stats_hourly"
-CH_COLUMNS = [
+ELASTICSEARCH_CONN_ID = "sharedservices-elasticsearch"
+CLICKHOUSE_CONN_ID = "sharedservices-clickhouse-spf-test"
+CLICKHOUSE_TABLE = "elasticsearch_index_stats_hourly"
+CLICKHOUSE_COLUMNS = [
     "ts",
     "dc",
     "namespace",
@@ -198,10 +198,10 @@ def attach_tenants(
     return tenant_index_stats
 
 
-def build_ch_rows(
+def build_clickhouse_rows(
     tenant_index_stats: Dict[str, Dict[str, Any]], ts: datetime, dc: str, namespace: str
 ) -> List[tuple]:
-    """Turn ``attach_tenants`` output into ``es_index_stats_hourly`` rows, in ``CH_COLUMNS`` order."""
+    """Turn ``attach_tenants`` output into ``es_index_stats_hourly`` rows, in ``CLICKHOUSE_COLUMNS`` order."""
     return [
         (
             ts,
@@ -229,7 +229,7 @@ def build_ch_rows(
     catchup=False,
     render_template_as_native_obj=True,
     params={
-        # Where ES_CONN_ID runs.
+        # Where ELASTICSEARCH_CONN_ID runs.
         "dc": Param("<dc>", type="string"),
         "namespace": Param("<namespace>", type="string"),
     },
@@ -243,7 +243,7 @@ def costobs_poc_dag():
 
     collect_es_index_stats = HttpOperator(
         task_id="collect_es_index_stats",
-        http_conn_id=ES_CONN_ID,
+        http_conn_id=ELASTICSEARCH_CONN_ID,
         method="GET",
         endpoint="/_all/_stats",
         data={"filter_path": "indices.*.total"},
@@ -255,8 +255,8 @@ def costobs_poc_dag():
     def insert_es_index_stats_hourly(
         tenant_index_stats: Dict[str, Dict[str, Any]], data_interval_end=None, params=None
     ) -> int:
-        rows = build_ch_rows(tenant_index_stats, data_interval_end, params["dc"], params["namespace"])
-        ClickHouseHook(clickhouse_conn_id=CH_CONN_ID).bulk_insert_rows(CH_TABLE, rows, column_names=CH_COLUMNS)
+        rows = build_clickhouse_rows(tenant_index_stats, data_interval_end, params["dc"], params["namespace"])
+        ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN_ID).bulk_insert_rows(CLICKHOUSE_TABLE, rows, column_names=CLICKHOUSE_COLUMNS)
         log.info("Wrote ts=%s dc=%s namespace=%s", data_interval_end, params["dc"], params["namespace"])
         return len(rows)
 
@@ -271,8 +271,8 @@ def costobs_poc_dag():
 
     read_es_index_stats_hourly = SQLExecuteQueryOperator(
         task_id="read_es_index_stats_hourly",
-        conn_id=CH_CONN_ID,
-        sql=f"SELECT * FROM {CH_TABLE}",
+        conn_id=CLICKHOUSE_CONN_ID,
+        sql=f"SELECT * FROM {CLICKHOUSE_TABLE}",
         handler=fetch_all_handler,
     )
 
