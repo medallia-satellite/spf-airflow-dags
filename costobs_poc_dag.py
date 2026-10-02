@@ -276,8 +276,8 @@ def costobs_poc_dag():
         handler=fetch_all_handler,
     )
 
-    tenant_index_stats = map_indices_to_tenants(collect_es_index_stats.output, fetch_tenant_mapping.output)
-    insert_es_index_stats_hourly(tenant_index_stats)
+    mapped_index_stats = map_indices_to_tenants(collect_es_index_stats.output, fetch_tenant_mapping.output)
+    insert_es_index_stats_hourly(mapped_index_stats)
 
 
 costobs_poc_dag()
