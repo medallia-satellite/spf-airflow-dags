@@ -230,8 +230,8 @@ def build_clickhouse_rows(
     render_template_as_native_obj=True,
     params={
         # Where ELASTICSEARCH_CONN_ID runs.
-        "dc": Param("<dc>", type="string"),
-        "namespace": Param("<namespace>", type="string"),
+        "dc": Param("den", type="string"),
+        "namespace": Param("sharedservices-elasticsearch", type="string"),
     },
 )
 def costobs_poc_dag():
