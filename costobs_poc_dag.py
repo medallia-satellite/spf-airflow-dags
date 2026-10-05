@@ -12,7 +12,8 @@ Attributes Elasticsearch resource usage to tenants. Tasks:
   and looks up the ``tenant_id``.
 - ``insert_es_index_stats_hourly``: writes one row per index to ClickHouse
   ``es_index_stats_hourly``, with ``ts`` set to the run's ``data_interval_end``.
-  Indices without a tenant are written with ``tenant_id = 0``.
+  Includes the parsed ``instance_id`` and ``in_app_id``. Indices without a tenant are written
+  with ``tenant_id = 0``, and with ``instance_id = 0`` / ``in_app_id = ''`` if the name doesn't parse.
 
 Params ``dc`` and ``namespace`` describe where the ``sharedservices-elasticsearch`` cluster runs
 and are written to the matching columns.
@@ -47,10 +48,15 @@ CLICKHOUSE_COLUMNS = [
     "cpu_ms_cumulative",
     "total_mem_bytes",
     "total_store_bytes",
+    "instance_id",
+    "in_app_id",
     "tenant_id",
 ]
 # tenant_id is part of the table's primary key, so it can't be NULL; 0 marks unattributed indices.
+# instance_id and in_app_id use 0 and "" the same way when the index name doesn't parse.
 UNATTRIBUTED_TENANT_ID = 0
+UNKNOWN_INSTANCE_ID = 0
+UNKNOWN_IN_APP_ID = ""
 TENANT_REGISTRY_CONN_ID = "tenant-registry"
 TENANT_REGISTRY_ENDPOINT = "/api/v0/applications/id/com.medallia.express/instances/"
 
@@ -212,6 +218,8 @@ def build_clickhouse_rows(
             stats["cpu_ms"],
             stats["memory_bytes"],
             stats["storage_bytes"],
+            stats["instance_id"] if stats["instance_id"] is not None else UNKNOWN_INSTANCE_ID,
+            stats["in_app_id"] if stats["in_app_id"] is not None else UNKNOWN_IN_APP_ID,
             stats["tenant_id"] if stats["tenant_id"] is not None else UNATTRIBUTED_TENANT_ID,
         )
         for index, stats in tenant_index_stats.items()
