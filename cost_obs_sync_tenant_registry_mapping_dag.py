@@ -92,18 +92,7 @@ def cost_obs_sync_tenant_registry_mapping_dag():
     prepare_staging_table = SQLExecuteQueryOperator(
         task_id="prepare_staging_table",
         conn_id=CLICKHOUSE_CONN_ID,
-        sql=[
-            f"""
-            CREATE TABLE IF NOT EXISTS {CLICKHOUSE_TABLE} (
-                instance_id UInt64,
-                in_app_id   LowCardinality(String),
-                tenant_id   UInt64
-            ) ENGINE = MergeTree
-            ORDER BY (instance_id, in_app_id)
-            """,
-            f"CREATE TABLE IF NOT EXISTS {CLICKHOUSE_STAGING_TABLE} AS {CLICKHOUSE_TABLE}",
-            f"TRUNCATE TABLE {CLICKHOUSE_STAGING_TABLE}",
-        ],
+        sql=f"TRUNCATE TABLE {CLICKHOUSE_STAGING_TABLE}",
     )
 
     @task
