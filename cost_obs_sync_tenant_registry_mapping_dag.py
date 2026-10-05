@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 TENANT_REGISTRY_CONN_ID = "tenant-registry"
 TENANT_REGISTRY_ENDPOINT = "/api/v0/applications/id/com.medallia.express/instances/"
 CLICKHOUSE_CONN_ID = "sharedservices-clickhouse-spf-test"
+CLICKHOUSE_CLUSTER_NAME = "my_cluster"
 CLICKHOUSE_TABLE = "tenant_registry_mapping"
 CLICKHOUSE_STAGING_TABLE = f"{CLICKHOUSE_TABLE}_staging"
 CLICKHOUSE_COLUMNS = ["instance_id", "in_app_id", "tenant_id"]
@@ -110,7 +111,7 @@ def cost_obs_sync_tenant_registry_mapping_dag():
     swap_tables = SQLExecuteQueryOperator(
         task_id="swap_tables",
         conn_id=CLICKHOUSE_CONN_ID,
-        sql=f"EXCHANGE TABLES {CLICKHOUSE_STAGING_TABLE} AND {CLICKHOUSE_TABLE}",
+        sql=f"EXCHANGE TABLES {CLICKHOUSE_STAGING_TABLE} AND {CLICKHOUSE_TABLE} ON CLUSTER {CLICKHOUSE_CLUSTER_NAME}",
     )
 
     truncate_staging_table >> load_staging_table(fetch_tenant_mapping.output) >> swap_tables
