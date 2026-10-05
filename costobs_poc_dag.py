@@ -225,7 +225,7 @@ def build_clickhouse_rows(
     doc_md=__doc__,
     max_active_runs=1,
     start_date=datetime(2026, 1, 1),
-    schedule="@daily",
+    schedule="@hourly",
     catchup=False,
     render_template_as_native_obj=True,
     params={
