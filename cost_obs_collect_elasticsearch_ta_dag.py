@@ -157,7 +157,7 @@ def build_clickhouse_rows(
         "namespace": Param("sharedservices-elasticsearch", type="string"),
     },
 )
-def cost_obs_collect_es_ta_dag():
+def cost_obs_collect_elasticsearch_ta_dag():
     collect_elasticsearch_index_stats = HttpOperator(
         task_id="collect_elasticsearch_index_stats",
         http_conn_id=ELASTICSEARCH_CONN_ID,
@@ -182,4 +182,4 @@ def cost_obs_collect_es_ta_dag():
     insert_elasticsearch_index_stats_raw(collect_elasticsearch_index_stats.output)
 
 
-cost_obs_collect_es_ta_dag()
+cost_obs_collect_elasticsearch_ta_dag()
