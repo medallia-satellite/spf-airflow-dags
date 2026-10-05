@@ -5,12 +5,14 @@ Keeps ClickHouse ``tenant_registry_mapping`` in sync with Tenant Registry, one
 
 - ``fetch_tenant_mapping``: lists Express instances from Tenant Registry
   (``GET /api/v0/applications/id/com.medallia.express/instances/``), reduced to one row per tenant.
-- ``prepare_staging_table``: creates ``tenant_registry_mapping`` and its ``_staging`` copy if
-  missing, and empties the staging copy.
+- ``truncate_staging_table``: empties ``tenant_registry_mapping_staging``.
 - ``load_staging_table``: bulk inserts the mapping into the staging copy. Fails instead of
   loading if Tenant Registry returned no tenants, so an outage can't wipe the table.
 - ``swap_tables``: ``EXCHANGE TABLES`` swaps the staging copy with the real table atomically,
   so readers never see a partial or empty table, and tenants removed from the registry disappear.
+
+Both ``tenant_registry_mapping`` and ``tenant_registry_mapping_staging`` must already exist in
+ClickHouse with the same schema; the DAG doesn't create them.
 
 Connections: ``tenant-registry`` (HTTP, host ``https://tenant-registry.eng.medallia.com``, no auth)
 and ``sharedservices-clickhouse-spf-test`` (ClickHouse).
@@ -89,8 +91,8 @@ def cost_obs_sync_tenant_registry_mapping_dag():
         response_filter=lambda response: parse_tenant_mapping(response.json()),
     )
 
-    prepare_staging_table = SQLExecuteQueryOperator(
-        task_id="prepare_staging_table",
+    truncate_staging_table = SQLExecuteQueryOperator(
+        task_id="truncate_staging_table",
         conn_id=CLICKHOUSE_CONN_ID,
         sql=f"TRUNCATE TABLE {CLICKHOUSE_STAGING_TABLE}",
     )
@@ -111,8 +113,7 @@ def cost_obs_sync_tenant_registry_mapping_dag():
         sql=f"EXCHANGE TABLES {CLICKHOUSE_STAGING_TABLE} AND {CLICKHOUSE_TABLE}",
     )
 
-    load = load_staging_table(fetch_tenant_mapping.output)
-    prepare_staging_table >> load >> swap_tables
+    truncate_staging_table >> load_staging_table(fetch_tenant_mapping.output) >> swap_tables
 
 
 cost_obs_sync_tenant_registry_mapping_dag()
