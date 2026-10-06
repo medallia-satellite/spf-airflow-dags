@@ -4,7 +4,7 @@ Splits one day of an Elasticsearch cluster's measured CPU, memory and storage be
 and writes the result to ClickHouse ``tenant_resource_usage_daily``. Tasks:
 
 - ``fetch_cluster_totals``: the cluster's CPU and memory for the day from ``cost.workload_usage_daily``
-  (sc4 costopt), added up over every workload in the namespace, both usage and requests.
+  (sc4 costopt), added up over the cluster's own containers (``containers`` param), both usage and requests.
   Fails if the day has no rows, so a missing collection is never published as zero.
 - ``fetch_tenant_usage``: the day's hourly ``elasticsearch_index_stats`` grouped by
   ``(tenant_id, instance_id, in_app_id)``. The tenant is looked up in ``tenant_registry_mapping``
@@ -16,13 +16,13 @@ and writes the result to ClickHouse ``tenant_resource_usage_daily``. Tasks:
 How each resource type is split (``weight`` is the tenant's share and adds up to 1 per
 dc/service/deployment/resource_type/date, ``tenant_id = 0`` included):
 
-| resource_type  | cluster_total                            | tenant weight                         | unit       | rung      |
-|----------------|------------------------------------------|---------------------------------------|------------|-----------|
-| cpu            | CPU used by the namespace's pods         | tenant's share of cpu_ms              | core_hours | activity  |
-| cpu_request    | CPU requested by the namespace's pods    | tenant's share of cpu_ms              | core_hours | activity  |
-| memory         | memory used by the namespace's pods      | tenant's share of storage (see below) | gib_avg    | footprint |
-| memory_request | memory requested by the namespace's pods | tenant's share of storage (see below) | gib_avg    | footprint |
-| storage        | sum of the tenants' storage              | tenant's share of storage             | gib_avg    | measured  |
+| resource_type  | cluster_total                                | tenant weight                         | unit       | rung      |
+|----------------|----------------------------------------------|---------------------------------------|------------|-----------|
+| cpu            | CPU used by the cluster's containers         | tenant's share of cpu_ms              | core_hours | activity  |
+| cpu_request    | CPU requested by the cluster's containers    | tenant's share of cpu_ms              | core_hours | activity  |
+| memory         | memory used by the cluster's containers      | tenant's share of storage (see below) | gib_avg    | footprint |
+| memory_request | memory requested by the cluster's containers | tenant's share of storage (see below) | gib_avg    | footprint |
+| storage        | sum of the tenants' storage                  | tenant's share of storage             | gib_avg    | measured  |
 
 For cpu and memory, ``value = cluster_total * weight``. For storage, ``value`` is the tenant's own
 measured storage, so ``value = cluster_total * weight`` holds there too.
@@ -36,7 +36,10 @@ measured storage, so ``value = cluster_total * weight`` holds there too.
 Rows with ``tenant_id = 0`` always get rung ``unattributed``.
 
 Params ``dc`` and ``namespace`` describe where the Elasticsearch cluster runs; ``namespace`` is
-written as ``deployment``. ``date`` defaults to the run's ``ds``.
+written as ``deployment``. ``containers`` lists the containers that make up the cluster's
+consumption (default ``elasticsearch``); anything else in the namespace (init containers, sidecars,
+helpers like ``registrator``, ``gateway`` or ``elasticsearch-shards-reporter``) is left out of the
+cluster totals. ``date`` defaults to the run's ``ds``.
 
 Connections: ``clickhouse_costopt_sc4`` (ClickHouse, read-only) and
 ``sharedservices-clickhouse-spf-test`` (ClickHouse).
@@ -81,7 +84,7 @@ GIB = 1024**3
 # *_avg columns are per-pod averages over those samples. One pod running all day = 1440 samples.
 SAMPLES_PER_DAY = 1440
 
-# Every workload in the namespace counts towards the cluster total, sidecars included.
+# Only the containers in the ``containers`` param count towards the cluster total.
 # avg * sample_count / SAMPLES_PER_DAY is the per-pod average times the pod-days the workload ran.
 CLUSTER_TOTALS_SQL = f"""
 SELECT
@@ -92,6 +95,7 @@ SELECT
     sum(mem_request_bytes_avg * sample_count) / {SAMPLES_PER_DAY} / {GIB} AS memory_request_gib
 FROM cost.workload_usage_daily
 WHERE dc = %(dc)s AND k8s_namespace = %(namespace)s AND window_start = %(date)s
+  AND has(%(containers)s, k8s_container)
 """
 
 # Hourly stats are stamped with the end of their hour, so the day is (00:00, 24:00] UTC.
@@ -217,17 +221,24 @@ def build_clickhouse_rows(
         # Where the Elasticsearch cluster runs.
         "dc": Param("den", type="string"),
         "namespace": Param("sharedservices-elasticsearch", type="string"),
+        # Containers that make up the cluster's consumption; everything else in the namespace is ignored.
+        "containers": Param(["elasticsearch"], type="array"),
         # Day to publish (YYYY-MM-DD); empty means the run's ds.
         "date": Param("", type="string"),
     },
 )
 def cost_obs_publish_tenant_resource_usage_dag():
     @task
-    def query_params(ds=None, params=None) -> Dict[str, str]:
-        return {"dc": params["dc"], "namespace": params["namespace"], "date": params["date"] or ds}
+    def query_params(ds=None, params=None) -> Dict[str, Any]:
+        return {
+            "dc": params["dc"],
+            "namespace": params["namespace"],
+            "containers": params["containers"],
+            "date": params["date"] or ds,
+        }
 
     @task
-    def fetch_cluster_totals(query: Dict[str, str]) -> Dict[str, float]:
+    def fetch_cluster_totals(query: Dict[str, Any]) -> Dict[str, float]:
         hook = ClickHouseHook(clickhouse_conn_id=COSTOPT_CONN_ID)
         workload_rows, *totals = hook.get_first(CLUSTER_TOTALS_SQL, parameters=query)
         if not workload_rows:
@@ -239,7 +250,7 @@ def cost_obs_publish_tenant_resource_usage_dag():
         return cluster_totals
 
     @task
-    def fetch_tenant_usage(query: Dict[str, str]) -> List[Dict[str, Any]]:
+    def fetch_tenant_usage(query: Dict[str, Any]) -> List[Dict[str, Any]]:
         hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN_ID)
         tenant_usage = [dict(zip(TENANT_USAGE_COLUMNS, row)) for row in hook.get_records(TENANT_USAGE_SQL, parameters=query)]
         if not tenant_usage:
@@ -257,7 +268,7 @@ def cost_obs_publish_tenant_resource_usage_dag():
 
     @task
     def publish_tenant_resource_usage(
-        query: Dict[str, str], cluster_totals: Dict[str, float], tenant_usage: List[Dict[str, Any]]
+        query: Dict[str, Any], cluster_totals: Dict[str, float], tenant_usage: List[Dict[str, Any]]
     ) -> int:
         hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN_ID)
         revision = hook.get_first(NEXT_REVISION_SQL, parameters=query)[0]
