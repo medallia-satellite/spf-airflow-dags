@@ -37,9 +37,9 @@ Rows with ``tenant_id = 0`` always get rung ``unattributed``.
 
 Params ``dc`` and ``namespace`` describe where the Elasticsearch cluster runs; ``namespace`` is
 written as ``deployment``. ``containers`` lists the containers that make up the cluster's
-consumption (default ``elasticsearch``); anything else in the namespace (init containers, sidecars,
-helpers like ``registrator``, ``gateway`` or ``elasticsearch-shards-reporter``) is left out of the
-cluster totals. ``date`` defaults to the run's ``ds``.
+consumption (default ``elasticsearch`` and ``gateway``); anything else in the namespace (init
+containers, sidecars, helpers like ``registrator`` or ``elasticsearch-shards-reporter``) is left out
+of the cluster totals. ``date`` defaults to the run's ``ds``.
 
 Connections: ``clickhouse_costopt_sc4`` (ClickHouse, read-only) and
 ``sharedservices-clickhouse-spf-test`` (ClickHouse).
@@ -222,7 +222,7 @@ def build_clickhouse_rows(
         "dc": Param("den", type="string"),
         "namespace": Param("sharedservices-elasticsearch", type="string"),
         # Containers that make up the cluster's consumption; everything else in the namespace is ignored.
-        "containers": Param(["elasticsearch"], type="array"),
+        "containers": Param(["elasticsearch", "gateway"], type="array"),
         # Day to publish (YYYY-MM-DD); empty means the run's ds.
         "date": Param("", type="string"),
     },
