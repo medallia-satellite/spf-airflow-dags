@@ -1,32 +1,49 @@
 """Cost Observability: collect Elasticsearch index stats.
 
-Collects per-index resource usage from Elasticsearch and stores it in ClickHouse. Tasks:
+Collects per-index resource usage from every configured Elasticsearch cluster and stores it in
+ClickHouse. Tasks:
 
-- ``collect_elasticsearch_index_stats``: ``GET /_all/_stats`` on Elasticsearch, reduced to
-  ``docs_count``, ``cpu_ms``, ``memory_bytes`` and ``storage_bytes`` per seaas surveys index,
-  plus the ``instance_id`` and ``in_app_id`` parsed from the index name.
-- ``insert_elasticsearch_index_stats_raw``: writes one row per index to ClickHouse
-  ``elasticsearch_index_stats_raw``, with ``ts`` set to the run's ``data_interval_end``.
+- ``load_elasticsearch_clusters``: reads the clusters to collect from (see below) and fails
+  early if the configuration is invalid.
+- ``collect_elasticsearch_index_stats`` (one mapped instance per cluster): ``GET /_all/_stats``
+  on the cluster, reduced to ``docs_count``, ``cpu_ms``, ``memory_bytes`` and ``storage_bytes``
+  per seaas surveys index, plus the ``instance_id`` and ``in_app_id`` parsed from the index name.
+- ``insert_elasticsearch_index_stats_raw`` (one mapped instance per cluster): writes one row per
+  index to ClickHouse ``elasticsearch_index_stats_raw``, with the cluster's ``dc`` / ``namespace``
+  and ``ts`` set to the run's ``data_interval_end``.
 
-Params ``dc`` and ``namespace`` describe where the ``sharedservices-elasticsearch`` cluster runs
-and are written to the matching columns.
+Clusters are configured per Airflow deployment (this DAG runs in several DCs) in the JSON
+Variable ``cost_obs_elasticsearch_clusters``. Each entry ties together the Elasticsearch
+connection to collect from and the ``dc`` / ``namespace`` written to ClickHouse, so they can't
+be mismatched::
 
-Connections: ``sharedservices-elasticsearch`` and ``sharedservices-clickhouse-spf-test`` (ClickHouse).
+    [
+        {
+            "elasticsearch_conn_id": "sharedservices-elasticsearch",
+            "dc": "den",
+            "namespace": "sharedservices-elasticsearch"
+        }
+    ]
+
+Connections: each cluster's ``elasticsearch_conn_id`` and ``sharedservices-clickhouse-spf-test``
+(ClickHouse).
 """
 
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from airflow.decorators import dag, task
-from airflow.models import Param
+from airflow.models import Variable
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
 from airflow.providers.http.operators.http import HttpOperator
 
 log = logging.getLogger(__name__)
 
-ELASTICSEARCH_CONN_ID = "sharedservices-elasticsearch"
+# Per-deployment JSON Variable with this DC's clusters; format in the module docstring.
+ELASTICSEARCH_CLUSTERS_VARIABLE = "cost_obs_elasticsearch_clusters"
+ELASTICSEARCH_CLUSTER_FIELDS = ("elasticsearch_conn_id", "dc", "namespace")
 CLICKHOUSE_CONN_ID = "sharedservices-clickhouse-spf-test"
 CLICKHOUSE_TABLE = "elasticsearch_index_stats_raw"
 CLICKHOUSE_COLUMNS = [
@@ -117,6 +134,22 @@ def parse_index_stats(stats_response: dict) -> Dict[str, Dict[str, Any]]:
     return index_stats
 
 
+def validate_clusters(clusters: Any) -> List[Dict[str, str]]:
+    """Check the ``ELASTICSEARCH_CLUSTERS_VARIABLE`` value and return its clusters.
+
+    Raises ``ValueError`` unless it's a non-empty list whose entries all have
+    ``ELASTICSEARCH_CLUSTER_FIELDS``. Extra keys are dropped.
+    """
+    if not isinstance(clusters, list) or not clusters:
+        raise ValueError(f"Variable {ELASTICSEARCH_CLUSTERS_VARIABLE} must be a non-empty JSON list of clusters")
+    for i, cluster in enumerate(clusters):
+        missing = [field for field in ELASTICSEARCH_CLUSTER_FIELDS if field not in cluster]
+        if missing:
+            raise ValueError(f"Variable {ELASTICSEARCH_CLUSTERS_VARIABLE} entry {i} is missing {missing}")
+    log.info("Collecting from %d Elasticsearch clusters: %s", len(clusters), clusters)
+    return [{field: cluster[field] for field in ELASTICSEARCH_CLUSTER_FIELDS} for cluster in clusters]
+
+
 def build_clickhouse_rows(
     index_stats: Dict[str, Dict[str, Any]], ts: datetime, dc: str, namespace: str
 ) -> List[tuple]:
@@ -151,35 +184,41 @@ def build_clickhouse_rows(
     schedule="@hourly",
     catchup=False,
     render_template_as_native_obj=True,
-    params={
-        # Where ELASTICSEARCH_CONN_ID runs.
-        "dc": Param("den", type="string"),
-        "namespace": Param("sharedservices-elasticsearch", type="string"),
-    },
 )
 def cost_obs_collect_elasticsearch_ta_dag():
-    collect_elasticsearch_index_stats = HttpOperator(
+    @task
+    def load_elasticsearch_clusters() -> List[Dict[str, str]]:
+        return validate_clusters(Variable.get(ELASTICSEARCH_CLUSTERS_VARIABLE, deserialize_json=True))
+
+    clusters = load_elasticsearch_clusters()
+
+    # One mapped instance per cluster, labelled with its connection id in the UI.
+    collect_elasticsearch_index_stats = HttpOperator.partial(
         task_id="collect_elasticsearch_index_stats",
-        http_conn_id=ELASTICSEARCH_CONN_ID,
+        map_index_template="{{ task.http_conn_id }}",
         method="GET",
         endpoint="/_all/_stats",
         data={"filter_path": "indices.*.total"},
         headers={"Accept": "application/json"},
         response_filter=lambda response: parse_index_stats(response.json()),
-    )
+    ).expand(http_conn_id=clusters.map(lambda cluster: cluster["elasticsearch_conn_id"]))
 
     @task
     def insert_elasticsearch_index_stats_raw(
-        index_stats: Dict[str, Dict[str, Any]], data_interval_end=None, params=None
+        stats_and_cluster: Tuple[Dict[str, Dict[str, Any]], Dict[str, str]], data_interval_end=None
     ) -> int:
-        rows = build_clickhouse_rows(index_stats, data_interval_end, params["dc"], params["namespace"])
+        index_stats, cluster = stats_and_cluster
+        rows = build_clickhouse_rows(index_stats, data_interval_end, cluster["dc"], cluster["namespace"])
         ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN_ID).bulk_insert_rows(
             CLICKHOUSE_TABLE, rows, column_names=CLICKHOUSE_COLUMNS
         )
-        log.info("Wrote ts=%s dc=%s namespace=%s", data_interval_end, params["dc"], params["namespace"])
+        log.info("Wrote ts=%s dc=%s namespace=%s", data_interval_end, cluster["dc"], cluster["namespace"])
         return len(rows)
 
-    insert_elasticsearch_index_stats_raw(collect_elasticsearch_index_stats.output)
+    # Mapped instances line up by index, so zip pairs each cluster's stats with that cluster.
+    insert_elasticsearch_index_stats_raw.expand(
+        stats_and_cluster=collect_elasticsearch_index_stats.output.zip(clusters)
+    )
 
 
 cost_obs_collect_elasticsearch_ta_dag()
