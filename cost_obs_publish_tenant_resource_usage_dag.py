@@ -16,20 +16,23 @@ and writes the result to ClickHouse ``tenant_resource_usage_daily``. Tasks:
 How each resource type is split (``weight`` is the tenant's share and adds up to 1 per
 dc/service/deployment/resource_type/date, ``tenant_id = 0`` included):
 
-==================  =========================================  ===========  ==============
-resource_type       weight from                                value        rung
-==================  =========================================  ===========  ==============
-cpu                 cpu_ms spent on the tenant's indices       core-hours   activity
-cpu_request         same as cpu                                core-hours   activity
-memory              same as storage                            GiB average  footprint
-memory_request      same as storage                            GiB average  footprint
-storage             hourly average of the indices' store size  GiB          measured
-==================  =========================================  ===========  ==============
+| resource_type  | cluster_total                            | tenant weight                         | unit       | rung      |
+|----------------|------------------------------------------|---------------------------------------|------------|-----------|
+| cpu            | CPU used by the namespace's pods         | tenant's share of cpu_ms              | core_hours | activity  |
+| cpu_request    | CPU requested by the namespace's pods    | tenant's share of cpu_ms              | core_hours | activity  |
+| memory         | memory used by the namespace's pods      | tenant's share of storage (see below) | gib_avg    | footprint |
+| memory_request | memory requested by the namespace's pods | tenant's share of storage (see below) | gib_avg    | footprint |
+| storage        | sum of the tenants' storage              | tenant's share of storage             | gib_avg    | measured  |
 
-For cpu and memory, ``value = cluster_total * weight``. Storage is measured per index, so
-``value`` is the tenant's own GiB and ``cluster_total`` the sum over all indices.
-Memory is weighted by storage because Elasticsearch 8 reports 0 for the per-index memory stats
-(``total_mem_bytes``), and heap and page cache grow with the data an index holds.
+For cpu and memory, ``value = cluster_total * weight``. For storage, ``value`` is the tenant's own
+measured storage, so ``value = cluster_total * weight`` holds there too.
+
+- cpu_ms: search and indexing time spent on the tenant's indices during the day.
+- storage: store size of the tenant's indices, measured every hour and averaged over the day
+  (like storage billing), so an index deleted or created mid-day counts for the hours it existed.
+- memory: Elasticsearch 8 reports 0 for per-index memory (``total_mem_bytes``), so the tenant's
+  share of storage is used instead: heap, caches and page cache grow with the data an index holds.
+
 Rows with ``tenant_id = 0`` always get rung ``unattributed``.
 
 Params ``dc`` and ``namespace`` describe where the Elasticsearch cluster runs; ``namespace`` is
@@ -193,7 +196,7 @@ def build_clickhouse_rows(
 
     storage_total = sum(tenant["storage_bytes"] for tenant in tenant_usage) / GIB
     for tenant, weight in zip(tenant_usage, compute_weights(tenant_usage, "storage_bytes")):
-        add_row(tenant, "storage", tenant["storage_bytes"] / GIB, "gib", weight, storage_total, "measured")
+        add_row(tenant, "storage", tenant["storage_bytes"] / GIB, "gib_avg", weight, storage_total, "measured")
 
     return rows
 
