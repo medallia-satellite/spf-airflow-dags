@@ -65,11 +65,11 @@ CLICKHOUSE_COLUMNS = [
     "in_app_id",
 ]
 
-# Tenant index names, tried in order (<instance> is the instance's hostname, always *.medallia.*):
+# Tenant index names, tried in order (<instance> is the instance's hostname):
 #   seaas-<in_app_id>_surveys-<instance>-<in_app_id>-<instance_id>-<suffix>
 #   seaas-<in_app_id>_topic-builder-<instance>-<in_app_id>-<YYYY-MM-01>-<instance_id>-<suffix>
 #     e.g. seaas-pkgdentest_topic-builder-pkgdentest.medallia.com-pkgdentest-2023-10-01-101880-0
-_SEAAS_INDEX_BODY = r"-(?P<instance>[\w-]+(?:\.[\w-]+)*\.medallia(?:\.\w+)+)-(?P=in_app_id)"
+_SEAAS_INDEX_BODY = r"-(?P<instance>[\w-]+(?:\.[\w-]+)*)-(?P=in_app_id)"
 _SEAAS_INDEX_TAIL = r"-(?P<instance_id>[0-9]+)-(?P<suffix>[0-9]+)$"
 SEAAS_INDEX_REGEXES = [
     re.compile(r"^seaas-(?P<in_app_id>\w+)_surveys" + _SEAAS_INDEX_BODY + _SEAAS_INDEX_TAIL),
