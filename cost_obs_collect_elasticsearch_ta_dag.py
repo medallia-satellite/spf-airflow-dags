@@ -7,8 +7,8 @@ Elasticsearch cluster, stored in ClickHouse. Tasks:
   early if the configuration is invalid.
 - ``collect_elasticsearch_index_stats`` (one mapped instance per cluster): ``GET /_all/_stats``
   on the cluster, reduced to ``total_docs_count``, ``cpu_ms_cumulative``, ``total_mem_bytes`` and
-  ``total_store_bytes`` per seaas surveys index, plus the ``instance_id`` and ``in_app_id`` parsed
-  from the index name. Records the snapshot's ``ts`` as soon as the response comes back.
+  ``total_store_bytes`` per seaas surveys or topic-builder index, plus the ``instance_id`` and
+  ``in_app_id`` parsed from the index name. Records the snapshot's ``ts`` as soon as the response comes back.
 - ``insert_elasticsearch_index_stats_raw`` (one mapped instance per cluster): writes one row per
   index to ClickHouse ``spf.elasticsearch_index_stats_raw``, with the snapshot's ``ts`` and the
   cluster's ``dc`` / ``namespace``.
@@ -38,7 +38,7 @@ Connections: each cluster's ``elasticsearch_conn_id`` and ``sharedservices-click
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from airflow.decorators import dag, task
 from airflow.models import Variable
@@ -65,11 +65,19 @@ CLICKHOUSE_COLUMNS = [
     "in_app_id",
 ]
 
-# seaas-<in_app_id>_surveys-...-<in_app_id>-<instance_id>-<suffix>
-SEAAS_INDEX_REGEX = re.compile(
-    r"^seaas-(?P<in_app_id>\w+)_surveys(-\w+)+(\.\w{2,4}){0,2}(\.\w+)(\.\w{2,4}){1,2}-(?P=in_app_id)"
-    r"-(?P<instance_id>[0-9]+)-(?P<suffix>[0-9]+)$"
-)
+# Tenant index names, tried in order (<instance> is the instance's hostname, always *.medallia.*):
+#   seaas-<in_app_id>_surveys-<instance>-<in_app_id>-<instance_id>-<suffix>
+#   seaas-<in_app_id>_topic-builder-<instance>-<in_app_id>-<YYYY-MM-01>-<instance_id>-<suffix>
+#     e.g. seaas-pkgdentest_topic-builder-pkgdentest.medallia.com-pkgdentest-2023-10-01-101880-0
+_SEAAS_INDEX_BODY = r"-(?P<instance>[\w-]+(?:\.[\w-]+)*\.medallia(?:\.\w+)+)-(?P=in_app_id)"
+_SEAAS_INDEX_TAIL = r"-(?P<instance_id>[0-9]+)-(?P<suffix>[0-9]+)$"
+SEAAS_INDEX_REGEXES = [
+    re.compile(r"^seaas-(?P<in_app_id>\w+)_surveys" + _SEAAS_INDEX_BODY + _SEAAS_INDEX_TAIL),
+    re.compile(
+        r"^seaas-(?P<in_app_id>\w+)_topic-builder" + _SEAAS_INDEX_BODY
+        + r"-(?P<month>[0-9]{4}-[0-9]{2}-[0-9]{2})" + _SEAAS_INDEX_TAIL
+    ),
+]
 
 # (section, field) pairs from the ``total`` block of ``GET /_stats``, added up per metric.
 CPU_FIELDS = [
@@ -92,14 +100,19 @@ STORAGE_FIELDS = [
 ]
 
 
+def match_seaas_index(index: str) -> Optional[re.Match]:
+    """Return the first ``SEAAS_INDEX_REGEXES`` match for ``index``, or None."""
+    return next((m for m in (regex.fullmatch(index) for regex in SEAAS_INDEX_REGEXES) if m), None)
+
+
 def parse_index_stats(stats_response: dict) -> Dict[str, Dict[str, Any]]:
-    """Reduce a ``GET /_stats`` response to per-index stats for seaas surveys indices.
+    """Reduce a ``GET /_stats`` response to per-index stats for seaas surveys and topic-builder indices.
 
     Each kept index gets ``total_docs_count``, ``cpu_ms_cumulative``, ``total_mem_bytes`` and
     ``total_store_bytes`` (named like the ClickHouse columns), plus the ``instance_id`` and
-    ``in_app_id`` parsed from its name with ``SEAAS_INDEX_REGEX``. Non-``seaas-`` indices
-    (system indices like ``.kibana``) are skipped silently; ``seaas-`` indices that don't match
-    the pattern are skipped with a warning.
+    ``in_app_id`` parsed from its name with ``SEAAS_INDEX_REGEXES``. Non-``seaas-`` indices
+    (system indices like ``.kibana``) are skipped silently; ``seaas-`` indices that match neither
+    pattern are skipped with a warning.
 
     Uses the ``total`` section, so primaries and replicas are both counted.
     ``cpu_ms_cumulative`` is the time spent on search and indexing since the shards started.
@@ -110,11 +123,11 @@ def parse_index_stats(stats_response: dict) -> Dict[str, Dict[str, Any]]:
 
     index_stats = {}
     for index, stats in stats_response.get("indices", {}).items():
-        match = SEAAS_INDEX_REGEX.fullmatch(index)
         if not index.startswith("seaas-"):
             continue
-        elif not match:
-            log.warning("Skipping %s: name doesn't match the seaas surveys index pattern", index)
+        match = match_seaas_index(index)
+        if not match:
+            log.warning("Skipping %s: name doesn't match any seaas index pattern", index)
             continue
 
         instance_id, in_app_id = int(match["instance_id"]), match["in_app_id"]
