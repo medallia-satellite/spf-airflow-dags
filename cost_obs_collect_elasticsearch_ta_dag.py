@@ -1,17 +1,22 @@
 """Cost Observability: collect Elasticsearch index stats.
 
-Collects per-index resource usage from every configured Elasticsearch cluster and stores it in
-ClickHouse. Tasks:
+Runs hourly and takes one snapshot of per-index resource usage from every configured
+Elasticsearch cluster, stored in ClickHouse. Tasks:
 
 - ``load_elasticsearch_clusters``: reads the clusters to collect from (see below) and fails
   early if the configuration is invalid.
 - ``collect_elasticsearch_index_stats`` (one mapped instance per cluster): ``GET /_all/_stats``
   on the cluster, reduced to ``total_docs_count``, ``cpu_ms_cumulative``, ``total_mem_bytes`` and
   ``total_store_bytes`` per seaas surveys index, plus the ``instance_id`` and ``in_app_id`` parsed
-  from the index name.
+  from the index name. Records the snapshot's ``ts`` as soon as the response comes back.
 - ``insert_elasticsearch_index_stats_raw`` (one mapped instance per cluster): writes one row per
-  index to ClickHouse ``spf.elasticsearch_index_stats_raw``, with the cluster's ``dc`` /
-  ``namespace`` and ``ts`` set to the run's ``data_interval_end``.
+  index to ClickHouse ``spf.elasticsearch_index_stats_raw``, with the snapshot's ``ts`` and the
+  cluster's ``dc`` / ``namespace``.
+
+``ts`` is when the cluster's ``_stats`` response came back (UTC), not the run's data interval:
+the stats are a snapshot of that moment and can't be backfilled, so late runs, reruns and manual
+runs each record a correctly timed snapshot (a rerun or manual run adds an extra snapshot rather
+than overwriting one). All indices of one snapshot share its ``ts``; each cluster gets its own.
 
 Clusters are configured per Airflow deployment (this DAG runs in several DCs) in the JSON
 Variable ``cost_obs_elasticsearch_clusters``. Each entry ties together the Elasticsearch
@@ -32,7 +37,7 @@ Connections: each cluster's ``elasticsearch_conn_id`` and ``sharedservices-click
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 from airflow.decorators import dag, task
@@ -135,6 +140,15 @@ def parse_index_stats(stats_response: dict) -> Dict[str, Dict[str, Any]]:
     return index_stats
 
 
+def snapshot_index_stats(stats_response: dict) -> Dict[str, Any]:
+    """Return ``{"ts": now (UTC), "index_stats": parse_index_stats(stats_response)}`` for one cluster.
+
+    Called as the collect task's ``response_filter``, so ``ts`` is taken right after the cluster
+    answered and becomes the ``ts`` of every row written for this snapshot.
+    """
+    return {"ts": datetime.now(timezone.utc), "index_stats": parse_index_stats(stats_response)}
+
+
 def validate_clusters(clusters: Any) -> List[Dict[str, str]]:
     """Check the ``ELASTICSEARCH_CLUSTERS_VARIABLE`` value and return its clusters.
 
@@ -154,7 +168,10 @@ def validate_clusters(clusters: Any) -> List[Dict[str, str]]:
 def build_clickhouse_rows(
     index_stats: Dict[str, Dict[str, Any]], ts: datetime, dc: str, namespace: str
 ) -> List[tuple]:
-    """Turn ``parse_index_stats`` output into ``elasticsearch_index_stats_raw`` rows, in ``CLICKHOUSE_COLUMNS`` order."""
+    """Turn ``parse_index_stats`` output into ``elasticsearch_index_stats_raw`` rows, in ``CLICKHOUSE_COLUMNS`` order.
+
+    ``ts`` is the snapshot time from ``snapshot_index_stats``; ``dc`` and ``namespace`` come from the cluster.
+    """
     rows = []
     for index, stats in index_stats.items():
         row = {"ts": ts, "dc": dc, "namespace": namespace, "index_name": index, **stats}
@@ -191,24 +208,25 @@ def cost_obs_collect_elasticsearch_ta_dag():
         endpoint="/_all/_stats",
         data={"filter_path": "indices.*.total"},
         headers={"Accept": "application/json"},
-        response_filter=lambda response: parse_index_stats(response.json()),
+        response_filter=lambda response: snapshot_index_stats(response.json()),
     ).expand(http_conn_id=clusters.map(lambda cluster: cluster["elasticsearch_conn_id"]))
 
     @task
     def insert_elasticsearch_index_stats_raw(
-        stats_and_cluster: Tuple[Dict[str, Dict[str, Any]], Dict[str, str]], data_interval_end=None
+        snapshot_and_cluster: Tuple[Dict[str, Any], Dict[str, str]],
     ) -> int:
-        index_stats, cluster = stats_and_cluster
-        rows = build_clickhouse_rows(index_stats, data_interval_end, cluster["dc"], cluster["namespace"])
+        snapshot, cluster = snapshot_and_cluster
+        ts = snapshot["ts"]
+        rows = build_clickhouse_rows(snapshot["index_stats"], ts, cluster["dc"], cluster["namespace"])
         ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN_ID).bulk_insert_rows(
             CLICKHOUSE_TABLE, rows, column_names=CLICKHOUSE_COLUMNS
         )
-        log.info("Wrote ts=%s dc=%s namespace=%s", data_interval_end, cluster["dc"], cluster["namespace"])
+        log.info("Wrote ts=%s dc=%s namespace=%s", ts, cluster["dc"], cluster["namespace"])
         return len(rows)
 
-    # Mapped instances line up by index, so zip pairs each cluster's stats with that cluster.
+    # Mapped instances line up by index, so zip pairs each cluster's snapshot with that cluster.
     insert_elasticsearch_index_stats_raw.expand(
-        stats_and_cluster=collect_elasticsearch_index_stats.output.zip(clusters)
+        snapshot_and_cluster=collect_elasticsearch_index_stats.output.zip(clusters)
     )
 
 
