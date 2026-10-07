@@ -6,11 +6,12 @@ ClickHouse. Tasks:
 - ``load_elasticsearch_clusters``: reads the clusters to collect from (see below) and fails
   early if the configuration is invalid.
 - ``collect_elasticsearch_index_stats`` (one mapped instance per cluster): ``GET /_all/_stats``
-  on the cluster, reduced to ``docs_count``, ``cpu_ms``, ``memory_bytes`` and ``storage_bytes``
-  per seaas surveys index, plus the ``instance_id`` and ``in_app_id`` parsed from the index name.
+  on the cluster, reduced to ``total_docs_count``, ``cpu_ms_cumulative``, ``total_mem_bytes`` and
+  ``total_store_bytes`` per seaas surveys index, plus the ``instance_id`` and ``in_app_id`` parsed
+  from the index name.
 - ``insert_elasticsearch_index_stats_raw`` (one mapped instance per cluster): writes one row per
-  index to ClickHouse ``elasticsearch_index_stats_raw``, with the cluster's ``dc`` / ``namespace``
-  and ``ts`` set to the run's ``data_interval_end``.
+  index to ClickHouse ``spf.elasticsearch_index_stats_raw``, with the cluster's ``dc`` /
+  ``namespace`` and ``ts`` set to the run's ``data_interval_end``.
 
 Clusters are configured per Airflow deployment (this DAG runs in several DCs) in the JSON
 Variable ``cost_obs_elasticsearch_clusters``. Each entry ties together the Elasticsearch
@@ -45,7 +46,7 @@ log = logging.getLogger(__name__)
 ELASTICSEARCH_CLUSTERS_VARIABLE = "cost_obs_elasticsearch_clusters"
 ELASTICSEARCH_CLUSTER_FIELDS = ("elasticsearch_conn_id", "dc", "namespace")
 CLICKHOUSE_CONN_ID = "sharedservices-clickhouse-spf-test"
-CLICKHOUSE_TABLE = "elasticsearch_index_stats_raw"
+CLICKHOUSE_TABLE = "spf.elasticsearch_index_stats_raw"
 CLICKHOUSE_COLUMNS = [
     "ts",
     "dc",
@@ -89,14 +90,14 @@ STORAGE_FIELDS = [
 def parse_index_stats(stats_response: dict) -> Dict[str, Dict[str, Any]]:
     """Reduce a ``GET /_stats`` response to per-index stats for seaas surveys indices.
 
-    Each kept index gets docs_count, cpu_ms, memory_bytes and storage_bytes, plus the
-    ``instance_id`` and ``in_app_id`` parsed from its name with ``SEAAS_INDEX_REGEX``.
-    Non-``seaas-`` indices (system indices like ``.kibana``) are skipped silently;
-    ``seaas-`` indices that don't match the pattern are skipped with a warning.
+    Each kept index gets ``total_docs_count``, ``cpu_ms_cumulative``, ``total_mem_bytes`` and
+    ``total_store_bytes`` (named like the ClickHouse columns), plus the ``instance_id`` and
+    ``in_app_id`` parsed from its name with ``SEAAS_INDEX_REGEX``. Non-``seaas-`` indices
+    (system indices like ``.kibana``) are skipped silently; ``seaas-`` indices that don't match
+    the pattern are skipped with a warning.
 
     Uses the ``total`` section, so primaries and replicas are both counted.
-    cpu_ms is the time spent on search and indexing, added up since the shards started.
-    It is a running total, not the time spent since the last DAG run.
+    ``cpu_ms_cumulative`` is the time spent on search and indexing since the shards started.
     """
 
     def sum_fields(totals: dict, fields) -> int:
@@ -115,20 +116,20 @@ def parse_index_stats(stats_response: dict) -> Dict[str, Dict[str, Any]]:
 
         totals = stats.get("total", {})
         index_stats[index] = {
-            "docs_count": totals.get("docs", {}).get("count", 0),
-            "cpu_ms": sum_fields(totals, CPU_FIELDS),
-            "memory_bytes": sum_fields(totals, MEMORY_FIELDS),
-            "storage_bytes": sum_fields(totals, STORAGE_FIELDS),
+            "total_docs_count": totals.get("docs", {}).get("count", 0),
+            "cpu_ms_cumulative": sum_fields(totals, CPU_FIELDS),
+            "total_mem_bytes": sum_fields(totals, MEMORY_FIELDS),
+            "total_store_bytes": sum_fields(totals, STORAGE_FIELDS),
             "instance_id": instance_id,
             "in_app_id": in_app_id,
         }
 
     log.info(
-        "Collected stats for %d indices: cpu_ms=%d memory_bytes=%d storage_bytes=%d",
+        "Collected stats for %d indices: cpu_ms_cumulative=%d total_mem_bytes=%d total_store_bytes=%d",
         len(index_stats),
-        sum(s["cpu_ms"] for s in index_stats.values()),
-        sum(s["memory_bytes"] for s in index_stats.values()),
-        sum(s["storage_bytes"] for s in index_stats.values()),
+        sum(s["cpu_ms_cumulative"] for s in index_stats.values()),
+        sum(s["total_mem_bytes"] for s in index_stats.values()),
+        sum(s["total_store_bytes"] for s in index_stats.values()),
     )
 
     return index_stats
@@ -138,7 +139,7 @@ def validate_clusters(clusters: Any) -> List[Dict[str, str]]:
     """Check the ``ELASTICSEARCH_CLUSTERS_VARIABLE`` value and return its clusters.
 
     Raises ``ValueError`` unless it's a non-empty list whose entries all have
-    ``ELASTICSEARCH_CLUSTER_FIELDS``. Extra keys are dropped.
+    ``ELASTICSEARCH_CLUSTER_FIELDS``. Extra keys are dropped. Logs the clusters it returns.
     """
     if not isinstance(clusters, list) or not clusters:
         raise ValueError(f"Variable {ELASTICSEARCH_CLUSTERS_VARIABLE} must be a non-empty JSON list of clusters")
@@ -154,29 +155,19 @@ def build_clickhouse_rows(
     index_stats: Dict[str, Dict[str, Any]], ts: datetime, dc: str, namespace: str
 ) -> List[tuple]:
     """Turn ``parse_index_stats`` output into ``elasticsearch_index_stats_raw`` rows, in ``CLICKHOUSE_COLUMNS`` order."""
-    return [
-        (
-            ts,
-            dc,
-            namespace,
-            index,
-            stats["docs_count"],
-            stats["cpu_ms"],
-            stats["memory_bytes"],
-            stats["storage_bytes"],
-            stats["instance_id"],
-            stats["in_app_id"],
-        )
-        for index, stats in index_stats.items()
-    ]
+    rows = []
+    for index, stats in index_stats.items():
+        row = {"ts": ts, "dc": dc, "namespace": namespace, "index_name": index, **stats}
+        rows.append(tuple(row[column] for column in CLICKHOUSE_COLUMNS))
+    return rows
 
 
 @dag(
     dag_display_name="Cost Observability: Collect Elasticsearch Index Stats",
     tags=["spf", "elasticsearch", "clickhouse", "cost-observability"],
     description=(
-        "Collect per-index docs/CPU/memory/storage from Elasticsearch into ClickHouse "
-        "elasticsearch_index_stats_raw."
+        "Collect per-index docs/CPU/memory/storage from every configured Elasticsearch cluster "
+        "into ClickHouse spf.elasticsearch_index_stats_raw."
     ),
     doc_md=__doc__,
     max_active_runs=1,

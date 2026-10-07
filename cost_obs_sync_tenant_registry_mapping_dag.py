@@ -1,18 +1,22 @@
 """Cost Observability: sync the Tenant Registry mapping to ClickHouse.
 
-Keeps ClickHouse ``tenant_registry_mapping`` in sync with Tenant Registry, one
-``(instance_id, in_app_id, tenant_id)`` row per tenant on an Express instance. Tasks:
+Keeps ClickHouse ``spf.tenant_registry_mapping`` in sync with Tenant Registry, one
+``(instance_id, in_app_id, tenant_id)`` row per tenant on an Express instance. The table's
+``updated_at`` column is filled by ClickHouse (``DEFAULT now()``) when the sync loads it. Tasks:
 
 - ``fetch_tenant_mapping``: lists Express instances from Tenant Registry
   (``GET /api/v0/applications/id/com.medallia.express/instances/``), reduced to one row per tenant.
-- ``truncate_staging_table``: empties ``tenant_registry_mapping_staging``.
+- ``truncate_staging_table``: empties ``spf.tenant_registry_mapping_staging``.
 - ``load_staging_table``: bulk inserts the mapping into the staging copy. Fails instead of
   loading if Tenant Registry returned no tenants, so an outage can't wipe the table.
 - ``swap_tables``: ``EXCHANGE TABLES`` swaps the staging copy with the real table atomically,
   so readers never see a partial or empty table, and tenants removed from the registry disappear.
 
-Both ``tenant_registry_mapping`` and ``tenant_registry_mapping_staging`` must already exist in
-ClickHouse with the same schema; the DAG doesn't create them.
+After the swap, the staging table holds the previous snapshot until the next run truncates it,
+so swapping the two tables back restores it.
+
+Both ``spf.tenant_registry_mapping`` and ``spf.tenant_registry_mapping_staging`` must already
+exist in ClickHouse with the same schema; the DAG doesn't create them.
 
 Connections: ``tenant-registry`` (HTTP, host ``https://tenant-registry.eng.medallia.com``, no auth)
 and ``sharedservices-clickhouse-spf-test`` (ClickHouse).
@@ -30,10 +34,11 @@ from airflow.providers.http.operators.http import HttpOperator
 log = logging.getLogger(__name__)
 
 TENANT_REGISTRY_CONN_ID = "tenant-registry"
-TENANT_REGISTRY_ENDPOINT = "/api/v0/applications/id/com.medallia.express/instances/"
+TENANT_REGISTRY_EXPRESS_INSTANCES_ENDPOINT = "/api/v0/applications/id/com.medallia.express/instances/"
 CLICKHOUSE_CONN_ID = "sharedservices-clickhouse-spf-test"
-CLICKHOUSE_TABLE = "tenant_registry_mapping"
+CLICKHOUSE_TABLE = "spf.tenant_registry_mapping"
 CLICKHOUSE_STAGING_TABLE = f"{CLICKHOUSE_TABLE}_staging"
+# updated_at isn't sent: the table fills it with DEFAULT now() on insert.
 CLICKHOUSE_COLUMNS = ["instance_id", "in_app_id", "tenant_id"]
 
 
@@ -73,7 +78,7 @@ def build_clickhouse_rows(tenant_mapping: List[Dict[str, Any]]) -> List[tuple]:
 @dag(
     dag_display_name="Cost Observability: Sync Tenant Registry Mapping",
     tags=["spf", "clickhouse", "cost-observability"],
-    description="Sync Tenant Registry (instance_id, in_app_id, tenant_id) to ClickHouse tenant_registry_mapping.",
+    description="Sync Tenant Registry (instance_id, in_app_id, tenant_id) to ClickHouse spf.tenant_registry_mapping.",
     doc_md=__doc__,
     max_active_runs=1,
     start_date=datetime(2026, 1, 1),
@@ -86,7 +91,7 @@ def cost_obs_sync_tenant_registry_mapping_dag():
         task_id="fetch_tenant_mapping",
         http_conn_id=TENANT_REGISTRY_CONN_ID,
         method="GET",
-        endpoint=TENANT_REGISTRY_ENDPOINT,
+        endpoint=TENANT_REGISTRY_EXPRESS_INSTANCES_ENDPOINT,
         headers={"Accept": "application/json"},
         response_filter=lambda response: parse_tenant_mapping(response.json()),
     )
