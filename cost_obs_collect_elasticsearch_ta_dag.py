@@ -36,14 +36,15 @@ Connections: each cluster's ``elasticsearch_conn_id`` and ``sharedservices-click
 """
 
 import logging
-import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from airflow.decorators import dag, task
 from airflow.models import Variable
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
 from airflow.providers.http.operators.http import HttpOperator
+
+from seaas_indices import match_seaas_index
 
 log = logging.getLogger(__name__)
 
@@ -65,20 +66,6 @@ CLICKHOUSE_COLUMNS = [
     "in_app_id",
 ]
 
-# Tenant index names, tried in order (<instance> is the instance's hostname):
-#   seaas-<in_app_id>_surveys-<instance>-<in_app_id>-<instance_id>-<suffix>
-#   seaas-<in_app_id>_topic-builder-<instance>-<in_app_id>-<YYYY-MM-01>-<instance_id>-<suffix>
-#     e.g. seaas-pkgdentest_topic-builder-pkgdentest.medallia.com-pkgdentest-2023-10-01-101880-0
-_SEAAS_INDEX_BODY = r"-(?P<instance>[\w-]+(?:\.[\w-]+)*)-(?P=in_app_id)"
-_SEAAS_INDEX_TAIL = r"-(?P<instance_id>[0-9]+)-(?P<suffix>[0-9]+)$"
-SEAAS_INDEX_REGEXES = [
-    re.compile(r"^seaas-(?P<in_app_id>\w+)_surveys" + _SEAAS_INDEX_BODY + _SEAAS_INDEX_TAIL),
-    re.compile(
-        r"^seaas-(?P<in_app_id>\w+)_topic-builder" + _SEAAS_INDEX_BODY
-        + r"-(?P<month>[0-9]{4}-[0-9]{2}-[0-9]{2})" + _SEAAS_INDEX_TAIL
-    ),
-]
-
 # (section, field) pairs from the ``total`` block of ``GET /_stats``, added up per metric.
 CPU_FIELDS = [
     ("search", "query_time_in_millis"),
@@ -98,11 +85,6 @@ STORAGE_FIELDS = [
     ("store", "size_in_bytes"),
     ("translog", "size_in_bytes"),
 ]
-
-
-def match_seaas_index(index: str) -> Optional[re.Match]:
-    """Return the first ``SEAAS_INDEX_REGEXES`` match for ``index``, or None."""
-    return next((m for m in (regex.fullmatch(index) for regex in SEAAS_INDEX_REGEXES) if m), None)
 
 
 def parse_index_stats(stats_response: dict) -> Dict[str, Dict[str, Any]]:
