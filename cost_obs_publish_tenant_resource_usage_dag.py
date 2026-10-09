@@ -34,7 +34,6 @@ dc/service/deployment/resource_type/date, ``tenant_id = 0`` included):
   nothing per index, so the rung is ``activity``.
 - storage: store size of the tenant's indices, measured every hour and averaged over the day
   (like storage billing), so an index deleted or created mid-day counts for the hours it existed.
-  Snapshots are bucketed to their nearest hour, so off-schedule or extra snapshots don't skew it.
 
 The rung describes how a resource was split, so all rows of a resource on a day share it,
 ``tenant_id = 0`` included. If no tenant has any cpu_ms for the day, cpu and the weighted part of
@@ -103,41 +102,32 @@ FROM cost.workload_usage_daily
 WHERE dc = %(dc)s AND k8s_namespace = %(namespace)s AND window_start = %(date)s
 """
 
-# The collector stamps each snapshot with the moment it was taken: the hourly run lands a few
-# seconds after the hour, and reruns or manual runs add extra snapshots. Each snapshot goes to its
-# nearest hour, and hours are stamped with their end, so the day is (00:00, 24:00] UTC.
-# cpu_ms_delta covers the time since the index's previous snapshot, so it is summed as is.
-# Memory and storage are averaged per index within each hour, then over every hour that has
-# stats, so extra snapshots don't count twice and an index missing from some hours counts as 0
-# for those hours.
+# The collector stamps each snapshot with the moment it was taken, a few seconds after the hour it
+# closes (the 24:00 one lands at 00:00:02 of the next day), and reruns or manual runs add extra
+# snapshots. So the day's snapshots are those in (00:30, 24:30] UTC. cpu_ms_delta covers the time
+# since the index's previous snapshot, so it adds up across any number of snapshots. Memory and
+# storage are averaged over the day's snapshots, so an index missing from some snapshots counts
+# as 0 for those.
 TENANT_USAGE_SQL = f"""
 WITH
     toDateTime(%(date)s, 'UTC') AS day_start,
-    hourly_stats AS (
-        SELECT
-            tenant_id,
-            index_name,
-            toStartOfHour(ts + INTERVAL 30 MINUTE) AS hour,
-            sum(cpu_ms_delta) AS cpu_ms,
-            avg(total_mem_bytes) AS mem_bytes,
-            avg(total_store_bytes) AS store_bytes
+    day_stats AS (
+        SELECT *
         FROM spf.elasticsearch_index_stats
         WHERE dc = %(dc)s AND namespace = %(namespace)s
-          AND ts > day_start - INTERVAL 30 MINUTE AND ts < day_start + INTERVAL 1 DAY + INTERVAL 30 MINUTE
-        GROUP BY tenant_id, index_name, hour
-        HAVING hour > day_start AND hour <= day_start + INTERVAL 1 DAY
+          AND ts > day_start + INTERVAL 30 MINUTE AND ts <= day_start + INTERVAL 1 DAY + INTERVAL 30 MINUTE
     ),
-    (SELECT uniqExact(hour) FROM hourly_stats) AS hours
+    (SELECT uniqExact(ts) FROM day_stats) AS snapshots
 SELECT
     tenant_id,
-    sum(cpu_ms) AS cpu_ms,
-    sum(mem_bytes) / hours / {GIB} AS memory_gib,
-    sum(store_bytes) / hours / {GIB} AS storage_gib,
-    hours
-FROM hourly_stats
+    sum(cpu_ms_delta) AS cpu_ms,
+    sum(total_mem_bytes) / snapshots / {GIB} AS memory_gib,
+    sum(total_store_bytes) / snapshots / {GIB} AS storage_gib,
+    snapshots
+FROM day_stats
 GROUP BY tenant_id
 """
-TENANT_USAGE_COLUMNS = ["tenant_id", "cpu_ms", "memory_gib", "storage_gib", "hours"]
+TENANT_USAGE_COLUMNS = ["tenant_id", "cpu_ms", "memory_gib", "storage_gib", "snapshots"]
 
 NEXT_REVISION_SQL = f"""
 SELECT max(revision) + 1
@@ -272,13 +262,13 @@ def cost_obs_publish_tenant_resource_usage_dag():
         tenant_usage = [dict(zip(TENANT_USAGE_COLUMNS, row)) for row in hook.get_records(TENANT_USAGE_SQL, parameters=query)]
         if not tenant_usage:
             raise ValueError(f"No elasticsearch_index_stats for {query}; not publishing")
-        hours = tenant_usage[0]["hours"]
-        if hours < 24:
-            log.warning("Only %d of 24 hours have elasticsearch_index_stats for %s", hours, query)
+        snapshots = tenant_usage[0]["snapshots"]
+        if snapshots < 24:
+            log.warning("Only %d snapshots in elasticsearch_index_stats for %s, expected 24", snapshots, query)
         log.info(
-            "%d tenants over %d hours, unattributed indices: %s",
+            "%d tenants over %d snapshots, unattributed indices: %s",
             len(tenant_usage),
-            hours,
+            snapshots,
             any(tenant["tenant_id"] == UNATTRIBUTED_TENANT_ID for tenant in tenant_usage),
         )
         return tenant_usage
