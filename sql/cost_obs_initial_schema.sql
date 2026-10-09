@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS spf.tenant_registry_mapping
 (
     `updated_at` DateTime DEFAULT now(),
     `instance_id` UInt64,
+    `hostname` LowCardinality(String),
     `in_app_id` LowCardinality(String),
     `tenant_id` UInt64
 )
