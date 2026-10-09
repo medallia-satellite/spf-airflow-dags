@@ -1,9 +1,9 @@
 """Cost Observability: sync the Tenant Registry mapping to ClickHouse.
 
 Keeps ClickHouse ``spf.tenant_registry_mapping`` in sync with Tenant Registry, one
-``(instance_id, hostname, in_app_id, tenant_id)`` row per tenant on an Express instance, where
-``hostname`` is the instance's. The table's ``updated_at`` column is filled by ClickHouse
-(``DEFAULT now()``) when the sync loads it. Tasks:
+``(dc, instance_id, hostname, in_app_id, tenant_id)`` row per tenant on an Express instance, where
+``dc`` (the registry's ``environment``) and ``hostname`` are the instance's. The table's
+``updated_at`` column is filled by ClickHouse (``DEFAULT now()``) when the sync loads it. Tasks:
 
 - ``fetch_tenant_mapping``: lists Express instances from Tenant Registry
   (``GET /api/v0/applications/id/com.medallia.express/instances/``), reduced to one row per tenant.
@@ -40,15 +40,16 @@ CLICKHOUSE_CONN_ID = "sharedservices-clickhouse-spf-test"
 CLICKHOUSE_TABLE = "spf.tenant_registry_mapping"
 CLICKHOUSE_STAGING_TABLE = f"{CLICKHOUSE_TABLE}_staging"
 # updated_at isn't sent: the table fills it with DEFAULT now() on insert.
-CLICKHOUSE_COLUMNS = ["instance_id", "hostname", "in_app_id", "tenant_id"]
+CLICKHOUSE_COLUMNS = ["dc", "instance_id", "hostname", "in_app_id", "tenant_id"]
 
 
 def parse_tenant_mapping(instances_response: dict) -> List[Dict[str, Any]]:
     """Map each tenant to its instance from a Tenant Registry Express instances response.
 
-    The top-level ``tenant_id`` of an item is the instance id and ``hostname`` the instance's
-    hostname; the item's ``tenants`` list holds the actual tenants, each with its own ``tenant_id``
-    and ``in_app_id``. Returns one row per tenant: ``{"instance_id", "hostname", "in_app_id", "tenant_id"}``.
+    The top-level ``tenant_id`` of an item is the instance id, ``environment`` the dc it runs in and
+    ``hostname`` its hostname; the item's ``tenants`` list holds the actual tenants, each with its
+    own ``tenant_id`` and ``in_app_id``. Returns one row per tenant:
+    ``{"dc", "instance_id", "hostname", "in_app_id", "tenant_id"}``.
 
     Raises ``KeyError`` if any of those fields is missing, so a malformed response fails the sync
     before anything is loaded and the current mapping stays in place.
@@ -59,6 +60,7 @@ def parse_tenant_mapping(instances_response: dict) -> List[Dict[str, Any]]:
 
     tenant_mapping = [
         {
+            "dc": instance["environment"],
             "instance_id": instance["tenant_id"],
             "hostname": instance["hostname"],
             "in_app_id": tenant["in_app_id"],

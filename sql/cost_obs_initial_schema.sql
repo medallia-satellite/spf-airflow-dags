@@ -66,6 +66,7 @@ SETTINGS index_granularity = 8192;
 CREATE TABLE IF NOT EXISTS spf.tenant_registry_mapping
 (
     `updated_at` DateTime DEFAULT now(),
+    `dc` LowCardinality(String),
     `instance_id` UInt64,
     `hostname` LowCardinality(String),
     `in_app_id` LowCardinality(String),
