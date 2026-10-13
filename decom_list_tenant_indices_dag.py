@@ -211,8 +211,8 @@ def decom_list_tenant_indices_dag():
 
     @task
     def summarize(registry_tenant: Dict[str, Any], per_cluster: List[Dict[str, Any]]) -> Dict[str, List[str]]:
-        lines = [f"{c['conn_id']} ({c['dc']}/{c['namespace']}): {len(c['indices'])} indices" for c in per_cluster]
-        lines += [f"  {c['conn_id']}: {index}" for c in per_cluster for index in c["indices"]]
+        lines = [f"{c['dc']} - {c['namespace']}: {len(c['indices'])} indices" for c in per_cluster]
+        lines += [f"  {c['dc']} - {c['namespace']}: {index}" for c in per_cluster for index in c["indices"]]
         log.info(
             "%d indices for %s across %d clusters:\n%s",
             sum(len(c["indices"]) for c in per_cluster),
