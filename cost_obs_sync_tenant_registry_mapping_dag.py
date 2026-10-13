@@ -7,13 +7,19 @@ Keeps ClickHouse ``spf.tenant_registry_mapping`` in sync with Tenant Registry, o
 
 - ``fetch_tenant_mapping``: lists Express instances from Tenant Registry
   (``GET /api/v0/applications/id/com.medallia.express/instances/``), reduced to one row per tenant.
-- ``truncate_staging_table``: empties ``spf.tenant_registry_mapping_staging``.
-- ``load_staging_table``: bulk inserts the mapping into the staging copy. Fails instead of
-  loading if Tenant Registry returned no tenants, so an outage can't wipe the table.
-- ``swap_tables``: ``EXCHANGE TABLES`` swaps the staging copy with the real table atomically,
-  so readers never see a partial or empty table, and tenants removed from the registry disappear.
+  Fails if a field is missing or the response is partial (fewer items than its ``_total``), so
+  the current mapping stays in place.
+- ``replace_tenant_mapping``: replaces the table's contents with the mapping, in order:
 
-After the swap, the staging table holds the previous snapshot until the next run truncates it,
+  1. fails if Tenant Registry returned no tenants, before touching ClickHouse, so an outage can't
+     wipe the table;
+  2. empties ``spf.tenant_registry_mapping_staging`` and bulk inserts the mapping into it;
+  3. ``EXCHANGE TABLES`` swaps the staging copy with the real table atomically, so readers never
+     see a partial or empty table, and tenants removed from the registry disappear.
+
+  A retry reruns all of it, which is safe: it starts by emptying the staging copy.
+
+After the swap, the staging table holds the previous snapshot until the next run empties it,
 so swapping the two tables back restores it.
 
 Both ``spf.tenant_registry_mapping`` and ``spf.tenant_registry_mapping_staging`` must already
@@ -29,7 +35,6 @@ from typing import Any, Dict, List
 
 from airflow.decorators import dag, task
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
-from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.http.operators.http import HttpOperator
 
 log = logging.getLogger(__name__)
@@ -51,12 +56,16 @@ def parse_tenant_mapping(instances_response: dict) -> List[Dict[str, Any]]:
     own ``tenant_id`` and ``in_app_id``. Returns one row per tenant:
     ``{"dc", "instance_id", "hostname", "in_app_id", "tenant_id"}``.
 
-    Raises ``KeyError`` if any of those fields is missing, so a malformed response fails the sync
-    before anything is loaded and the current mapping stays in place.
+    Raises ``KeyError`` if any of those fields is missing, and ``ValueError`` if ``_total`` doesn't
+    match the number of items returned, so a malformed or partial response fails the sync before
+    anything is loaded and the current mapping stays in place.
     """
-    instances = instances_response.get("items", [])
-    if instances_response.get("_total", len(instances)) != len(instances):
-        log.warning("Tenant Registry returned %d of %d instances", len(instances), instances_response["_total"])
+    instances = instances_response["items"]
+    if instances_response["_total"] != len(instances):
+        raise ValueError(
+            f"Tenant Registry returned {len(instances)} of {instances_response['_total']} instances; "
+            "refusing to replace the mapping with a partial one"
+        )
 
     tenant_mapping = [
         {
@@ -67,7 +76,7 @@ def parse_tenant_mapping(instances_response: dict) -> List[Dict[str, Any]]:
             "tenant_id": tenant["tenant_id"],
         }
         for instance in instances
-        for tenant in instance.get("tenants", [])
+        for tenant in instance["tenants"]
     ]
     log.info(
         "Mapped %d tenants across %d Express instances",
@@ -85,7 +94,7 @@ def build_clickhouse_rows(tenant_mapping: List[Dict[str, Any]]) -> List[tuple]:
 @dag(
     dag_display_name="Cost Observability: Sync Tenant Registry Mapping",
     tags=["spf", "clickhouse", "cost-observability"],
-    description="Sync Tenant Registry (instance_id, in_app_id, tenant_id) to ClickHouse spf.tenant_registry_mapping.",
+    description="Sync the Tenant Registry's Express tenant-to-instance mapping to ClickHouse spf.tenant_registry_mapping.",
     doc_md=__doc__,
     max_active_runs=1,
     start_date=datetime(2026, 1, 1),
@@ -103,29 +112,19 @@ def cost_obs_sync_tenant_registry_mapping_dag():
         response_filter=lambda response: parse_tenant_mapping(response.json()),
     )
 
-    truncate_staging_table = SQLExecuteQueryOperator(
-        task_id="truncate_staging_table",
-        conn_id=CLICKHOUSE_CONN_ID,
-        sql=f"TRUNCATE TABLE {CLICKHOUSE_STAGING_TABLE}",
-    )
-
     @task
-    def load_staging_table(tenant_mapping: List[Dict[str, Any]]) -> int:
+    def replace_tenant_mapping(tenant_mapping: List[Dict[str, Any]]) -> int:
         rows = build_clickhouse_rows(tenant_mapping)
         if not rows:
             raise ValueError("Tenant Registry returned no tenants; refusing to replace the mapping with an empty table")
-        ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN_ID).bulk_insert_rows(
-            CLICKHOUSE_STAGING_TABLE, rows, column_names=CLICKHOUSE_COLUMNS
-        )
+        hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN_ID)
+        hook.run(f"TRUNCATE TABLE {CLICKHOUSE_STAGING_TABLE}")
+        hook.bulk_insert_rows(CLICKHOUSE_STAGING_TABLE, rows, column_names=CLICKHOUSE_COLUMNS)
+        hook.run(f"EXCHANGE TABLES {CLICKHOUSE_STAGING_TABLE} AND {CLICKHOUSE_TABLE}")
+        log.info("Replaced %s with %d rows", CLICKHOUSE_TABLE, len(rows))
         return len(rows)
 
-    swap_tables = SQLExecuteQueryOperator(
-        task_id="swap_tables",
-        conn_id=CLICKHOUSE_CONN_ID,
-        sql=f"EXCHANGE TABLES {CLICKHOUSE_STAGING_TABLE} AND {CLICKHOUSE_TABLE}",
-    )
-
-    truncate_staging_table >> load_staging_table(fetch_tenant_mapping.output) >> swap_tables
+    replace_tenant_mapping(fetch_tenant_mapping.output)
 
 
 cost_obs_sync_tenant_registry_mapping_dag()
