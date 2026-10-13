@@ -16,7 +16,9 @@ Elasticsearch cluster, stored in ClickHouse. Tasks:
     ``spf.elasticsearch_index_stats_raw``, with the snapshot's ``ts`` and the cluster's ``dc`` /
     ``namespace``.
 
-  Each cluster's group runs, fails and retries on its own.
+  Each cluster's group runs, fails and retries on its own: every task retries twice, 5 minutes
+  apart, so a retry still lands within the hour, and the ``_stats`` request times out after 60s
+  so a hung cluster can't hold its task.
 
 ``ts`` is when the cluster's ``_stats`` response came back (UTC), not the run's data interval:
 the stats are a snapshot of that moment and can't be backfilled, so late runs, reruns and manual
@@ -41,7 +43,7 @@ Connections: each cluster's ``elasticsearch_conn_id`` and ``sharedservices-click
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from airflow.decorators import dag, task, task_group
@@ -192,6 +194,8 @@ def build_clickhouse_rows(
     schedule="@hourly",
     catchup=False,
     render_template_as_native_obj=True,
+    # Retries stay within the hour; a cluster that still fails loses that hour's snapshot.
+    default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},
 )
 def cost_obs_collect_elasticsearch_ta_dag():
     @task
@@ -219,6 +223,7 @@ def cost_obs_collect_elasticsearch_ta_dag():
             endpoint="/_all/_stats",
             data={"filter_path": "indices.*.total"},
             headers={"Accept": "application/json"},
+            extra_options={"timeout": 60},
             response_filter=lambda response: snapshot_index_stats(response.json()),
         )
         insert_index_stats_raw(collect_index_stats.output, dc, namespace)
