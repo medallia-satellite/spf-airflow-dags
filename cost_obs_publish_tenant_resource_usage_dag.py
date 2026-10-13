@@ -46,6 +46,8 @@ written as its ``deployment``. Every container in the namespace counts towards t
 helpers like ``registrator`` or ``elasticsearch-shards-reporter`` included, since they run because
 of the cluster. ``date`` defaults to the run's ``ds``.
 
+The queries are in ``sql/cost_obs/`` and the rung functions in ``cost_obs/rungs.py``.
+
 Connections: ``clickhouse_costopt_sc4`` (ClickHouse, read-only) and
 ``sharedservices-clickhouse-spf-test`` (ClickHouse).
 """
@@ -57,6 +59,9 @@ from typing import Any, Dict, List, Tuple
 from airflow.decorators import dag, task
 from airflow.models import Param
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
+
+from cost_obs.queries import load_query
+from cost_obs.rungs import UNATTRIBUTED_TENANT_ID, Split, rung_activity, rung_measured
 
 log = logging.getLogger(__name__)
 
@@ -80,85 +85,21 @@ CLICKHOUSE_COLUMNS = [
     "calculated_at",
 ]
 SERVICE = "elasticsearch"
-# Same convention as the elasticsearch_index_stats materialized view: 0 marks indices without a tenant.
-UNATTRIBUTED_TENANT_ID = 0
-GIB = 1024**3
-# workload_usage_daily samples each pod once a minute (5 samples per v_container_usage_5m window):
-# sample_count is pods x minutes, and the *_avg columns are per-pod averages over those samples.
-# One pod running all day = 1440 samples.
-SAMPLES_PER_HOUR = 60
-SAMPLES_PER_DAY = 24 * SAMPLES_PER_HOUR
 
-# avg * sample_count is core-minutes (or byte-minutes): / SAMPLES_PER_HOUR gives core-hours,
-# / SAMPLES_PER_DAY gives the memory held on average over the day.
-CLUSTER_TOTALS_SQL = f"""
-SELECT
-    count() AS workload_rows,
-    sum(cpu_usage_cores_avg * sample_count) / {SAMPLES_PER_HOUR} AS cpu_core_hours,
-    sum(cpu_request_cores_avg * sample_count) / {SAMPLES_PER_HOUR} AS cpu_request_core_hours,
-    sum(mem_working_set_bytes_avg * sample_count) / {SAMPLES_PER_DAY} / {GIB} AS memory_gib,
-    sum(mem_request_bytes_avg * sample_count) / {SAMPLES_PER_DAY} / {GIB} AS memory_request_gib
-FROM cost.workload_usage_daily
-WHERE dc = %(dc)s AND k8s_namespace = %(namespace)s AND window_start = %(date)s
-"""
-
-# The collector stamps each snapshot with the moment it was taken, a few seconds after the hour it
-# closes (the 24:00 one lands at 00:00:02 of the next day), and reruns or manual runs add extra
-# snapshots. So the day's snapshots are those in (00:30, 24:30] UTC. cpu_ms_delta covers the time
-# since the index's previous snapshot, so it adds up across any number of snapshots. Memory and
-# storage are averaged over the day's snapshots, so an index missing from some snapshots counts
-# as 0 for those.
-TENANT_USAGE_SQL = f"""
-WITH
-    toDateTime(%(date)s, 'UTC') AS day_start,
-    day_stats AS (
-        SELECT *
-        FROM spf.elasticsearch_index_stats
-        WHERE dc = %(dc)s AND namespace = %(namespace)s
-          AND ts > day_start + INTERVAL 30 MINUTE AND ts <= day_start + INTERVAL 1 DAY + INTERVAL 30 MINUTE
-    ),
-    (SELECT uniqExact(ts) FROM day_stats) AS snapshots
-SELECT
-    tenant_id,
-    sum(cpu_ms_delta) AS cpu_ms,
-    sum(total_mem_bytes) / snapshots / {GIB} AS memory_gib,
-    sum(total_store_bytes) / snapshots / {GIB} AS storage_gib,
-    snapshots
-FROM day_stats
-GROUP BY tenant_id
-"""
+CLUSTER_TOTALS_SQL = load_query("workload_cluster_totals")
+CLUSTER_TOTALS_COLUMNS = ["cpu_core_hours", "cpu_request_core_hours", "memory_gib", "memory_request_gib"]
+TENANT_USAGE_SQL = load_query("elasticsearch_tenant_usage")
 TENANT_USAGE_COLUMNS = ["tenant_id", "cpu_ms", "memory_gib", "storage_gib", "snapshots"]
+NEXT_REVISION_SQL = load_query("next_revision")
 
-NEXT_REVISION_SQL = f"""
-SELECT max(revision) + 1
-FROM spf.{CLICKHOUSE_TABLE}
-WHERE date = %(date)s AND dc = %(dc)s AND service = '{SERVICE}' AND deployment = %(namespace)s
-"""
-
-# resource_type -> (cluster total key, tenant's measured usage key or None, tenant usage key used as weight, unit)
-WEIGHTED_RESOURCES = {
-    "cpu": ("cpu_core_hours", None, "cpu_ms", "core_hours"),
-    "cpu_request": ("cpu_request_core_hours", None, "cpu_ms", "core_hours"),
-    "memory": ("memory_gib", "memory_gib", "cpu_ms", "gib_avg"),
-    "memory_request": ("memory_request_gib", "memory_gib", "cpu_ms", "gib_avg"),
+# resource_type -> (how it's split between tenants, unit); the rung_* keys are cluster totals and tenant usage columns.
+RESOURCES: Dict[str, Tuple[Split, str]] = {
+    "cpu": (rung_activity("cpu_core_hours", "cpu_ms"), "core_hours"),
+    "cpu_request": (rung_activity("cpu_request_core_hours", "cpu_ms"), "core_hours"),
+    "memory": (rung_activity("memory_gib", "cpu_ms", measured_key="memory_gib"), "gib_avg"),
+    "memory_request": (rung_activity("memory_request_gib", "cpu_ms", measured_key="memory_gib"), "gib_avg"),
+    "storage": (rung_measured("storage_gib"), "gib_avg"),
 }
-
-
-def compute_weights(tenant_usage: List[Dict[str, Any]], key: str) -> Tuple[List[float], str]:
-    """Each tenant's share of ``key``, in ``tenant_usage`` order, and the rung it was computed with.
-
-    Shares add up to 1. If no tenant has any ``key``, falls back to rung ``roster``: an equal split
-    between the known tenants. If none is known, everything goes to ``tenant_id = 0`` as ``unattributed``.
-    """
-    total = sum(tenant[key] for tenant in tenant_usage)
-    if total:
-        return [tenant[key] / total for tenant in tenant_usage], "activity"
-    members = [tenant["tenant_id"] != UNATTRIBUTED_TENANT_ID for tenant in tenant_usage]
-    if not any(members):
-        log.warning("No %s recorded and no known tenants; attributing everything to tenant_id 0", key)
-        return [1.0 if tenant["tenant_id"] == UNATTRIBUTED_TENANT_ID else 0.0 for tenant in tenant_usage], "unattributed"
-    log.warning("No %s recorded for any tenant; splitting equally between %d known tenants", key, sum(members))
-    return [member / sum(members) for member in members], "roster"
 
 
 def build_clickhouse_rows(
@@ -193,22 +134,10 @@ def build_clickhouse_rows(
             )
         )
 
-    for resource_type, (total_key, measured_key, weight_key, unit) in WEIGHTED_RESOURCES.items():
-        cluster_total = cluster_totals[total_key]
-        measured = [tenant[measured_key] if measured_key else 0.0 for tenant in tenant_usage]
-        rest = cluster_total - sum(measured)
-        if rest < 0:
-            log.warning("Measured %s (%f) exceeds the cluster total (%f); nothing left to weight", resource_type, sum(measured), cluster_total)
-            rest = 0.0
-        weights, rung = compute_weights(tenant_usage, weight_key)
-        for tenant, tenant_measured, weight in zip(tenant_usage, measured, weights):
-            value = tenant_measured + rest * weight
+    for resource_type, (split, unit) in RESOURCES.items():
+        cluster_total, values, rung = split(cluster_totals, tenant_usage)
+        for tenant, value in zip(tenant_usage, values):
             add_row(tenant, resource_type, value, unit, value / cluster_total if cluster_total else 0.0, cluster_total, rung)
-
-    storage_total = sum(tenant["storage_gib"] for tenant in tenant_usage)
-    for tenant in tenant_usage:
-        weight = tenant["storage_gib"] / storage_total if storage_total else 0.0
-        add_row(tenant, "storage", tenant["storage_gib"], "gib_avg", weight, storage_total, "measured")
 
     return rows
 
@@ -250,9 +179,7 @@ def cost_obs_publish_tenant_resource_usage_dag():
         workload_rows, *totals = hook.get_first(CLUSTER_TOTALS_SQL, parameters=query)
         if not workload_rows:
             raise ValueError(f"No workload_usage_daily rows for {query}; not publishing")
-        cluster_totals = dict(
-            zip(["cpu_core_hours", "cpu_request_core_hours", "memory_gib", "memory_request_gib"], totals)
-        )
+        cluster_totals = dict(zip(CLUSTER_TOTALS_COLUMNS, totals))
         log.info("Cluster totals for %s from %d workload rows: %s", query, workload_rows, cluster_totals)
         return cluster_totals
 
@@ -279,7 +206,7 @@ def cost_obs_publish_tenant_resource_usage_dag():
     ) -> int:
         query, cluster_totals, tenant_usage = query_and_usage
         hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_SPF_CONN_ID)
-        revision = hook.get_first(NEXT_REVISION_SQL, parameters=query)[0]
+        revision = hook.get_first(NEXT_REVISION_SQL, parameters={**query, "service": SERVICE})[0]
         rows = build_clickhouse_rows(
             cluster_totals,
             tenant_usage,
