@@ -7,6 +7,8 @@ Keeps ClickHouse ``spf.tenant_registry_mapping`` in sync with Tenant Registry, o
 
 - ``fetch_tenant_mapping``: lists Express instances from Tenant Registry
   (``GET /api/v0/applications/id/com.medallia.express/instances/``), reduced to one row per tenant.
+  Fails if a field is missing or the response is partial (fewer items than its ``_total``), so
+  the current mapping stays in place.
 - ``replace_tenant_mapping``: replaces the table's contents with the mapping, in order:
 
   1. fails if Tenant Registry returned no tenants, before touching ClickHouse, so an outage can't
@@ -54,12 +56,16 @@ def parse_tenant_mapping(instances_response: dict) -> List[Dict[str, Any]]:
     own ``tenant_id`` and ``in_app_id``. Returns one row per tenant:
     ``{"dc", "instance_id", "hostname", "in_app_id", "tenant_id"}``.
 
-    Raises ``KeyError`` if any of those fields is missing, so a malformed response fails the sync
-    before anything is loaded and the current mapping stays in place.
+    Raises ``KeyError`` if any of those fields is missing, and ``ValueError`` if ``_total`` doesn't
+    match the number of items returned, so a malformed or partial response fails the sync before
+    anything is loaded and the current mapping stays in place.
     """
-    instances = instances_response.get("items", [])
-    if instances_response.get("_total", len(instances)) != len(instances):
-        log.warning("Tenant Registry returned %d of %d instances", len(instances), instances_response["_total"])
+    instances = instances_response["items"]
+    if instances_response["_total"] != len(instances):
+        raise ValueError(
+            f"Tenant Registry returned {len(instances)} of {instances_response['_total']} instances; "
+            "refusing to replace the mapping with a partial one"
+        )
 
     tenant_mapping = [
         {
@@ -70,7 +76,7 @@ def parse_tenant_mapping(instances_response: dict) -> List[Dict[str, Any]]:
             "tenant_id": tenant["tenant_id"],
         }
         for instance in instances
-        for tenant in instance.get("tenants", [])
+        for tenant in instance["tenants"]
     ]
     log.info(
         "Mapped %d tenants across %d Express instances",
