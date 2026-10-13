@@ -5,13 +5,18 @@ Elasticsearch cluster, stored in ClickHouse. Tasks:
 
 - ``load_elasticsearch_clusters``: reads the clusters to collect from (see below) and fails
   early if the configuration is invalid.
-- ``collect_elasticsearch_index_stats`` (one mapped instance per cluster): ``GET /_all/_stats``
-  on the cluster, reduced to ``total_docs_count``, ``cpu_ms_cumulative``, ``total_mem_bytes`` and
-  ``total_store_bytes`` per seaas surveys or topic-builder index, plus the ``instance_id`` and
-  ``in_app_id`` parsed from the index name. Records the snapshot's ``ts`` as soon as the response comes back.
-- ``insert_elasticsearch_index_stats_raw`` (one mapped instance per cluster): writes one row per
-  index to ClickHouse ``spf.elasticsearch_index_stats_raw``, with the snapshot's ``ts`` and the
-  cluster's ``dc`` / ``namespace``.
+- ``elasticsearch_cluster`` (task group, one mapped instance per cluster, labelled with its
+  connection id), which runs:
+
+  - ``collect_elasticsearch_index_stats``: ``GET /_all/_stats`` on the cluster, reduced to
+    ``total_docs_count``, ``cpu_ms_cumulative``, ``total_mem_bytes`` and ``total_store_bytes`` per
+    seaas surveys or topic-builder index, plus the ``instance_id`` and ``in_app_id`` parsed from
+    the index name. Records the snapshot's ``ts`` as soon as the response comes back.
+  - ``insert_elasticsearch_index_stats_raw``: writes one row per index to ClickHouse
+    ``spf.elasticsearch_index_stats_raw``, with the snapshot's ``ts`` and the cluster's ``dc`` /
+    ``namespace``.
+
+  Each cluster's group runs, fails and retries on its own.
 
 ``ts`` is when the cluster's ``_stats`` response came back (UTC), not the run's data interval:
 the stats are a snapshot of that moment and can't be backfilled, so late runs, reruns and manual
@@ -37,9 +42,9 @@ Connections: each cluster's ``elasticsearch_conn_id`` and ``sharedservices-click
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
-from airflow.decorators import dag, task
+from airflow.decorators import dag, task, task_group
 from airflow.models import Variable
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
 from airflow.providers.http.operators.http import HttpOperator
@@ -193,36 +198,32 @@ def cost_obs_collect_elasticsearch_ta_dag():
     def load_elasticsearch_clusters() -> List[Dict[str, str]]:
         return validate_clusters(Variable.get(ELASTICSEARCH_CLUSTERS_VARIABLE, deserialize_json=True))
 
-    clusters = load_elasticsearch_clusters()
-
-    # One mapped instance per cluster, labelled with its connection id in the UI.
-    collect_elasticsearch_index_stats = HttpOperator.partial(
-        task_id="collect_elasticsearch_index_stats",
-        map_index_template="{{ task.http_conn_id }}",
-        method="GET",
-        endpoint="/_all/_stats",
-        data={"filter_path": "indices.*.total"},
-        headers={"Accept": "application/json"},
-        response_filter=lambda response: snapshot_index_stats(response.json()),
-    ).expand(http_conn_id=clusters.map(lambda cluster: cluster["elasticsearch_conn_id"]))
-
     @task
-    def insert_elasticsearch_index_stats_raw(
-        snapshot_and_cluster: Tuple[Dict[str, Any], Dict[str, str]],
-    ) -> int:
-        snapshot, cluster = snapshot_and_cluster
+    def insert_elasticsearch_index_stats_raw(snapshot: Dict[str, Any], dc: str, namespace: str) -> int:
         ts = snapshot["ts"]
-        rows = build_clickhouse_rows(snapshot["index_stats"], ts, cluster["dc"], cluster["namespace"])
+        rows = build_clickhouse_rows(snapshot["index_stats"], ts, dc, namespace)
         ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN_ID).bulk_insert_rows(
             CLICKHOUSE_TABLE, rows, column_names=CLICKHOUSE_COLUMNS
         )
-        log.info("Wrote ts=%s dc=%s namespace=%s", ts, cluster["dc"], cluster["namespace"])
+        log.info("Wrote ts=%s dc=%s namespace=%s", ts, dc, namespace)
         return len(rows)
 
-    # Mapped instances line up by index, so zip pairs each cluster's snapshot with that cluster.
-    insert_elasticsearch_index_stats_raw.expand(
-        snapshot_and_cluster=collect_elasticsearch_index_stats.output.zip(clusters)
-    )
+    # One group instance per cluster: collect its snapshot, then insert it with that cluster's dc / namespace.
+    @task_group
+    def elasticsearch_cluster(elasticsearch_conn_id: str, dc: str, namespace: str):
+        collect_elasticsearch_index_stats = HttpOperator(
+            task_id="collect_elasticsearch_index_stats",
+            map_index_template="{{ task.http_conn_id }}",  # labels the group instance in the UI
+            http_conn_id=elasticsearch_conn_id,
+            method="GET",
+            endpoint="/_all/_stats",
+            data={"filter_path": "indices.*.total"},
+            headers={"Accept": "application/json"},
+            response_filter=lambda response: snapshot_index_stats(response.json()),
+        )
+        insert_elasticsearch_index_stats_raw(collect_elasticsearch_index_stats.output, dc, namespace)
+
+    elasticsearch_cluster.expand_kwargs(load_elasticsearch_clusters())
 
 
 cost_obs_collect_elasticsearch_ta_dag()
