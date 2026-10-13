@@ -88,7 +88,7 @@ def build_clickhouse_rows(tenant_mapping: List[Dict[str, Any]]) -> List[tuple]:
 @dag(
     dag_display_name="Cost Observability: Sync Tenant Registry Mapping",
     tags=["spf", "clickhouse", "cost-observability"],
-    description="Sync Tenant Registry (instance_id, in_app_id, tenant_id) to ClickHouse spf.tenant_registry_mapping.",
+    description="Sync the Tenant Registry's Express tenant-to-instance mapping to ClickHouse spf.tenant_registry_mapping.",
     doc_md=__doc__,
     max_active_runs=1,
     start_date=datetime(2026, 1, 1),

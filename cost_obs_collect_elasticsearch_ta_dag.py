@@ -8,11 +8,11 @@ Elasticsearch cluster, stored in ClickHouse. Tasks:
 - ``elasticsearch_cluster`` (task group, one mapped instance per cluster, labelled with its
   connection id), which runs:
 
-  - ``collect_elasticsearch_index_stats``: ``GET /_all/_stats`` on the cluster, reduced to
+  - ``collect_index_stats``: ``GET /_all/_stats`` on the cluster, reduced to
     ``total_docs_count``, ``cpu_ms_cumulative``, ``total_mem_bytes`` and ``total_store_bytes`` per
     seaas surveys or topic-builder index, plus the ``instance_id`` and ``in_app_id`` parsed from
     the index name. Records the snapshot's ``ts`` as soon as the response comes back.
-  - ``insert_elasticsearch_index_stats_raw``: writes one row per index to ClickHouse
+  - ``insert_index_stats_raw``: writes one row per index to ClickHouse
     ``spf.elasticsearch_index_stats_raw``, with the snapshot's ``ts`` and the cluster's ``dc`` /
     ``namespace``.
 
@@ -199,7 +199,7 @@ def cost_obs_collect_elasticsearch_ta_dag():
         return validate_clusters(Variable.get(ELASTICSEARCH_CLUSTERS_VARIABLE, deserialize_json=True))
 
     @task
-    def insert_elasticsearch_index_stats_raw(snapshot: Dict[str, Any], dc: str, namespace: str) -> int:
+    def insert_index_stats_raw(snapshot: Dict[str, Any], dc: str, namespace: str) -> int:
         ts = snapshot["ts"]
         rows = build_clickhouse_rows(snapshot["index_stats"], ts, dc, namespace)
         ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN_ID).bulk_insert_rows(
@@ -211,8 +211,8 @@ def cost_obs_collect_elasticsearch_ta_dag():
     # One group instance per cluster: collect its snapshot, then insert it with that cluster's dc / namespace.
     @task_group
     def elasticsearch_cluster(elasticsearch_conn_id: str, dc: str, namespace: str):
-        collect_elasticsearch_index_stats = HttpOperator(
-            task_id="collect_elasticsearch_index_stats",
+        collect_index_stats = HttpOperator(
+            task_id="collect_index_stats",
             map_index_template="{{ task.http_conn_id }}",  # labels the group instance in the UI
             http_conn_id=elasticsearch_conn_id,
             method="GET",
@@ -221,7 +221,7 @@ def cost_obs_collect_elasticsearch_ta_dag():
             headers={"Accept": "application/json"},
             response_filter=lambda response: snapshot_index_stats(response.json()),
         )
-        insert_elasticsearch_index_stats_raw(collect_elasticsearch_index_stats.output, dc, namespace)
+        insert_index_stats_raw(collect_index_stats.output, dc, namespace)
 
     elasticsearch_cluster.expand_kwargs(load_elasticsearch_clusters())
 
