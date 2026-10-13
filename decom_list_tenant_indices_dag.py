@@ -17,6 +17,10 @@ cluster in the ``orchestrate_dag_targets`` Variable; it doesn't delete anything.
   ``instance_id`` all match the tenant's. Indices named for the tenant but with another
   ``instance_id`` are logged separately and not returned.
 - ``summarize``: logs every cluster's indices together, with counts.
+- ``check_snapshot`` (one mapped instance per cluster, after its ``list_indices``): skipped on
+  clusters without indices of the tenant. On the others, lists the snapshots in the
+  ``es-snapshots`` repository (``GET /_cat/snapshots/es-snapshots``) and fails unless one with
+  status ``SUCCESS`` started on the run's date (``ds``, UTC), i.e. the day it was triggered.
 
 ``orchestrate_dag_targets`` is the JSON Variable ``orchestrate_maintenance_dag`` also uses: one
 entry per cluster, keyed by its name. Only ``conn_id`` is used here::
@@ -30,9 +34,11 @@ Connections: each cluster's ``conn_id`` (Elasticsearch, HTTP) and ``tenant-regis
 """
 
 import logging
+from datetime import date, datetime, timezone
 from typing import Any, Dict, Iterable, List
 
 from airflow.decorators import dag, task
+from airflow.exceptions import AirflowSkipException
 from airflow.models import Param, Variable
 from airflow.operators.python import get_current_context
 
@@ -45,6 +51,7 @@ TENANT_REGISTRY_CONN_ID = "tenant-registry"
 TENANT_REGISTRY_EXPRESS_INSTANCES_ENDPOINT = "/api/v0/applications/id/com.medallia.express/instances/"
 # Per-deployment JSON Variable with the clusters to look in; format in the module docstring.
 CLUSTERS_VARIABLE = "orchestrate_dag_targets"
+SNAPSHOT_REPOSITORY = "es-snapshots"
 
 
 def validate_clusters(targets: Any) -> List[Dict[str, str]]:
@@ -129,6 +136,23 @@ def select_indices(index_names: Iterable[str], registry_tenant: Dict[str, Any]) 
     return sorted(selected)
 
 
+def find_snapshots_started_on(snapshots: List[Dict[str, Any]], day: date) -> List[str]:
+    """Return the ids of the ``SUCCESS`` snapshots in a ``GET /_cat/snapshots`` response that started on ``day`` (UTC).
+
+    Snapshots that started that day with another status (``IN_PROGRESS``, ``PARTIAL``, ``FAILED``)
+    are logged and not returned.
+    """
+    found = []
+    for snapshot in snapshots:
+        if datetime.fromtimestamp(int(snapshot["start_epoch"]), tz=timezone.utc).date() != day:
+            continue
+        if snapshot["status"] == "SUCCESS":
+            found.append(snapshot["id"])
+        else:
+            log.warning("Ignoring snapshot %s from %s: status %s", snapshot["id"], day, snapshot["status"])
+    return found
+
+
 @dag(
     dag_display_name="Decom: List Tenant Indices",
     tags=["spf", "elasticsearch", "decom"],
@@ -175,9 +199,27 @@ def decom_list_tenant_indices_dag():
         )
         return {c["name"]: c["indices"] for c in per_cluster}
 
+    @task(map_index_template="{{ cluster_name }}")
+    def check_snapshot(cluster: Dict[str, Any]) -> Dict[str, Any]:
+        context = get_current_context()
+        context["cluster_name"] = cluster["name"]
+        if not cluster["indices"]:
+            raise AirflowSkipException(f"No indices of the tenant on {cluster['name']}")
+        day = date.fromisoformat(context["ds"])
+        snapshots = http_hook_get(
+            cluster["conn_id"], f"/_cat/snapshots/{SNAPSHOT_REPOSITORY}", params={"format": "json"}
+        )
+        found = find_snapshots_started_on(snapshots, day)
+        if not found:
+            raise ValueError(f"No successful snapshot in {SNAPSHOT_REPOSITORY} on {cluster['name']} started on {day}")
+        log.info("Successful snapshots in %s on %s started on %s: %s", SNAPSHOT_REPOSITORY, cluster["name"], day, found)
+        return {"name": cluster["name"], "conn_id": cluster["conn_id"], "snapshots": found}
+
     registry_tenant = fetch_tenant()
-    per_cluster = list_indices.partial(registry_tenant=registry_tenant).expand(cluster=load_clusters())
+    clusters = load_clusters()
+    per_cluster = list_indices.partial(registry_tenant=registry_tenant).expand(cluster=clusters)
     summarize(registry_tenant, per_cluster)
+    check_snapshot.expand(cluster=per_cluster)
 
 
 decom_list_tenant_indices_dag()
