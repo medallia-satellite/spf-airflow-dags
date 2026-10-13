@@ -3,16 +3,17 @@
 Manually triggered, one tenant per run, identified by the ``hostname`` of its Express instance and
 its ``tenant`` name (its ``in_app_id`` in Tenant Registry and index names). Lists the tenant's
 seaas surveys and topic-builder indices (patterns in ``seaas_indices``) on every Elasticsearch
-cluster in the ``orchestrate_dag_targets`` Variable; it doesn't delete anything. Tasks:
+cluster in the ``elasticsearch_clusters`` Variable that lists this DAG in its ``active_dags``;
+it doesn't delete anything. Tasks:
 
-- ``load_clusters``: reads the clusters from ``orchestrate_dag_targets`` (see below) and fails
-  early if the Variable is invalid.
-
+- ``load_clusters``: reads the clusters from ``elasticsearch_clusters`` (see below) and keeps the
+  ones whose ``active_dags`` include this DAG. Fails early if the Variable is invalid or no
+  cluster has this DAG active.
 - ``fetch_tenant``: looks the tenant up in Tenant Registry
   (``GET /api/v0/applications/id/com.medallia.express/instances/``) to get its ``instance_id``
   (the instance's ``tenant_id``) and ``tenant_id``. Fails if it isn't there. Tenant Registry
   doesn't know whether a tenant is decommissioned; that's up to whoever triggers the run.
-- ``list_indices`` (one mapped instance per cluster): lists the cluster's indices
+- ``list_indices`` (one mapped instance per cluster, labelled with its ``conn_id``): lists the cluster's indices
   (``GET /_cat/indices``), logs and returns the seaas indices whose ``in_app_id``, hostname and
   ``instance_id`` all match the tenant's. Indices named for the tenant but with another
   ``instance_id`` are logged separately and not returned.
@@ -22,13 +23,17 @@ cluster in the ``orchestrate_dag_targets`` Variable; it doesn't delete anything.
   ``es-snapshots`` repository (``GET /_cat/snapshots/es-snapshots``) and fails unless one with
   status ``SUCCESS`` started on the run's date (``ds``, UTC), i.e. the day it was triggered.
 
-``orchestrate_dag_targets`` is the JSON Variable ``orchestrate_maintenance_dag`` also uses: one
-entry per cluster, keyed by its name. Only ``conn_id`` is used here::
+``elasticsearch_clusters`` is a per-deployment JSON Variable listing the Elasticsearch clusters,
+each with the DAGs that should run on it::
 
-    {
-        "wordtags": {"conn_id": "es-wordtags", "dry_run": false},
-        "wordtags-qa": {"conn_id": "es-wordtags-qa", "dry_run": false}
-    }
+    [
+        {
+            "conn_id": "es-wordtags",
+            "dc": "den",
+            "namespace": "wordtags",
+            "active_dags": ["decom_list_tenant_indices_dag"]
+        }
+    ]
 
 Connections: each cluster's ``conn_id`` (Elasticsearch, HTTP) and ``tenant-registry`` (HTTP).
 """
@@ -50,25 +55,42 @@ log = logging.getLogger(__name__)
 TENANT_REGISTRY_CONN_ID = "tenant-registry"
 TENANT_REGISTRY_EXPRESS_INSTANCES_ENDPOINT = "/api/v0/applications/id/com.medallia.express/instances/"
 # Per-deployment JSON Variable with the clusters to look in; format in the module docstring.
-CLUSTERS_VARIABLE = "orchestrate_dag_targets"
+CLUSTERS_VARIABLE = "elasticsearch_clusters"
+CLUSTER_FIELDS = ("conn_id", "dc", "namespace", "active_dags")
 SNAPSHOT_REPOSITORY = "es-snapshots"
 
 
-def validate_clusters(targets: Any) -> List[Dict[str, str]]:
-    """Turn the ``CLUSTERS_VARIABLE`` value into ``[{"name", "conn_id"}]``, sorted by name.
+def validate_clusters(clusters: Any, dag_id: str) -> List[Dict[str, str]]:
+    """Return the ``CLUSTERS_VARIABLE`` clusters that have ``dag_id`` in ``active_dags``.
 
-    Raises ``ValueError`` unless it's a non-empty JSON object whose entries all have a ``conn_id``.
+    Each as ``{"conn_id", "dc", "namespace"}``, sorted by ``conn_id``. Raises ``ValueError``
+    unless the value is a non-empty list of objects that all have ``CLUSTER_FIELDS``, with
+    ``active_dags`` a list, and at least one cluster, each with its own ``conn_id``, has ``dag_id``.
     """
-    if not isinstance(targets, dict) or not targets:
-        raise ValueError(f"Variable {CLUSTERS_VARIABLE} must be a non-empty JSON object of clusters")
-    missing = sorted(
-        name for name, target in targets.items() if not isinstance(target, dict) or not target.get("conn_id")
+    if not isinstance(clusters, list) or not clusters:
+        raise ValueError(f"Variable {CLUSTERS_VARIABLE} must be a non-empty JSON list of clusters")
+    for i, cluster in enumerate(clusters):
+        missing = [field for field in CLUSTER_FIELDS if not isinstance(cluster, dict) or field not in cluster]
+        if missing:
+            raise ValueError(f"Variable {CLUSTERS_VARIABLE} entry {i} is missing {missing}")
+        if not isinstance(cluster["active_dags"], list):
+            raise ValueError(f"Variable {CLUSTERS_VARIABLE} entry {i}: active_dags must be a list of DAG ids")
+
+    active = sorted(
+        (
+            {"conn_id": c["conn_id"], "dc": c["dc"], "namespace": c["namespace"]}
+            for c in clusters
+            if dag_id in c["active_dags"]
+        ),
+        key=lambda c: c["conn_id"],
     )
-    if missing:
-        raise ValueError(f"Variable {CLUSTERS_VARIABLE} entries without a conn_id: {missing}")
-    clusters = [{"name": name, "conn_id": targets[name]["conn_id"]} for name in sorted(targets)]
-    log.info("Looking in %d Elasticsearch clusters: %s", len(clusters), clusters)
-    return clusters
+    if not active:
+        raise ValueError(f"No cluster in Variable {CLUSTERS_VARIABLE} has {dag_id} in its active_dags")
+    conn_ids = [c["conn_id"] for c in active]
+    if len(set(conn_ids)) != len(conn_ids):
+        raise ValueError(f"Clusters with {dag_id} active share a conn_id: {conn_ids}")
+    log.info("Looking in %d Elasticsearch clusters: %s", len(active), active)
+    return active
 
 
 def find_tenant(instances_response: dict, hostname: str, tenant: str) -> Dict[str, Any]:
@@ -175,21 +197,22 @@ def decom_list_tenant_indices_dag():
 
     @task
     def load_clusters() -> List[Dict[str, str]]:
-        return validate_clusters(Variable.get(CLUSTERS_VARIABLE, deserialize_json=True))
+        dag_id = get_current_context()["dag"].dag_id
+        return validate_clusters(Variable.get(CLUSTERS_VARIABLE, deserialize_json=True), dag_id)
 
     # One mapped instance per cluster, labelled with the cluster's name in the UI.
     @task(map_index_template="{{ cluster_name }}")
     def list_indices(cluster: Dict[str, str], registry_tenant: Dict[str, Any]) -> Dict[str, Any]:
-        get_current_context()["cluster_name"] = cluster["name"]
+        get_current_context()["cluster_name"] = cluster["conn_id"]
         fetched = http_hook_get(cluster["conn_id"], "/_cat/indices", params={"h": "index", "format": "json"})
         indices = select_indices([r["index"] for r in fetched], registry_tenant)
-        log.info("%d indices for %s on %s:\n%s", len(indices), registry_tenant, cluster["name"], "\n".join(indices))
+        log.info("%d indices for %s on %s:\n%s", len(indices), registry_tenant, cluster, "\n".join(indices))
         return {**cluster, "indices": indices}
 
     @task
     def summarize(registry_tenant: Dict[str, Any], per_cluster: List[Dict[str, Any]]) -> Dict[str, List[str]]:
-        lines = [f"{c['name']} ({c['conn_id']}): {len(c['indices'])} indices" for c in per_cluster]
-        lines += [f"  {c['name']}: {index}" for c in per_cluster for index in c["indices"]]
+        lines = [f"{c['conn_id']} ({c['dc']}/{c['namespace']}): {len(c['indices'])} indices" for c in per_cluster]
+        lines += [f"  {c['conn_id']}: {index}" for c in per_cluster for index in c["indices"]]
         log.info(
             "%d indices for %s across %d clusters:\n%s",
             sum(len(c["indices"]) for c in per_cluster),
@@ -197,23 +220,24 @@ def decom_list_tenant_indices_dag():
             len(per_cluster),
             "\n".join(lines),
         )
-        return {c["name"]: c["indices"] for c in per_cluster}
+        return {c["conn_id"]: c["indices"] for c in per_cluster}
 
     @task(map_index_template="{{ cluster_name }}")
     def check_snapshot(cluster: Dict[str, Any]) -> Dict[str, Any]:
         context = get_current_context()
-        context["cluster_name"] = cluster["name"]
+        context["cluster_name"] = cluster["conn_id"]
         if not cluster["indices"]:
-            raise AirflowSkipException(f"No indices of the tenant on {cluster['name']}")
+            raise AirflowSkipException(f"No indices of the tenant on {cluster['conn_id']}")
         day = date.fromisoformat(context["ds"])
         snapshots = http_hook_get(
             cluster["conn_id"], f"/_cat/snapshots/{SNAPSHOT_REPOSITORY}", params={"format": "json"}
         )
         found = find_snapshots_started_on(snapshots, day)
+        conn_id = cluster["conn_id"]
         if not found:
-            raise ValueError(f"No successful snapshot in {SNAPSHOT_REPOSITORY} on {cluster['name']} started on {day}")
-        log.info("Successful snapshots in %s on %s started on %s: %s", SNAPSHOT_REPOSITORY, cluster["name"], day, found)
-        return {"name": cluster["name"], "conn_id": cluster["conn_id"], "snapshots": found}
+            raise ValueError(f"No successful snapshot in {SNAPSHOT_REPOSITORY} on {conn_id} started on {day}")
+        log.info("Successful snapshots in %s on %s started on %s: %s", SNAPSHOT_REPOSITORY, conn_id, day, found)
+        return {"conn_id": conn_id, "dc": cluster["dc"], "namespace": cluster["namespace"], "snapshots": found}
 
     registry_tenant = fetch_tenant()
     clusters = load_clusters()
