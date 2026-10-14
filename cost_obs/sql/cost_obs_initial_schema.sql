@@ -10,7 +10,7 @@
 --   dashboards                                   <- spf.tenant_resource_usage_daily_latest
 --
 -- Apply once per ClickHouse cluster, in order:
---   clickhouse-client --multiquery < sql/cost_obs_initial_schema.sql
+--   clickhouse-client --multiquery < cost_obs/sql/cost_obs_initial_schema.sql
 -- Needs the {cluster}, {shard} and {replica} macros on every server, and ClickHouse >= 24.10 so
 -- the refreshable view runs on one replica at a time in the Replicated database.
 -- Only CREATE DATABASE uses ON CLUSTER: the Replicated database sends the rest to every replica.
@@ -104,11 +104,12 @@ AS SELECT
     s.in_app_id             AS in_app_id,
     s.index_name            AS index_name,
     s.total_docs_count      AS total_docs_count,
-    -- 0 for an index's first sample (lag defaults to itself) and uses the new value when the counter went down.
+    -- 0 for an index's first sample (lag defaults to itself) and when the counter went down (shard
+    -- restart or relocation), so that interval's CPU is dropped rather than overcounted.
     -- UInt64 - UInt64 is Int64 in ClickHouse; the condition makes it non-negative, so cast it back.
     if(s.cpu_ms_cumulative >= s.p_cpu_ms_cumulative,
        toUInt64(s.cpu_ms_cumulative - s.p_cpu_ms_cumulative),
-       s.cpu_ms_cumulative) AS cpu_ms_delta,
+       0) AS cpu_ms_delta,
     s.total_mem_bytes       AS total_mem_bytes,
     s.total_store_bytes     AS total_store_bytes
 FROM

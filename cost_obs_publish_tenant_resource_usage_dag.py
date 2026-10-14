@@ -46,7 +46,7 @@ written as its ``deployment``. Every container in the namespace counts towards t
 helpers like ``registrator`` or ``elasticsearch-shards-reporter`` included, since they run because
 of the cluster. ``date`` defaults to the run's ``ds``.
 
-The queries are in ``sql/cost_obs/`` and the rung functions in ``cost_obs/rungs.py``.
+The queries are in ``cost_obs/sql/`` and the rung functions in ``cost_obs/rungs.py``.
 
 Connections: ``clickhouse_costopt_sc4`` (ClickHouse, read-only) and
 ``sharedservices-clickhouse-spf-test`` (ClickHouse).
