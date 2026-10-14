@@ -6,7 +6,7 @@ from typing import List
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
 
-from wordtags.fix_and_verify import (
+from topic_builder.fix_and_verify import (
     BASE_REGEX,
     INDEX_REGEX,
     ALIAS_REGEX_MAPPING,
@@ -32,7 +32,7 @@ from utils import (
 
 
 @dag(
-    dag_display_name="Reconcile Monthly Indices",
+    dag_display_name="Topic Builder: Reconcile Monthly Indices",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     max_active_runs=1,

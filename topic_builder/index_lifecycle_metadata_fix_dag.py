@@ -6,7 +6,7 @@ from collections import defaultdict
 from airflow.decorators import dag, task
 from airflow.models import Param
 
-from wordtags.fix_and_verify import (
+from topic_builder.fix_and_verify import (
     POLICY_MAPPING,
     extract_index_details,
     index_has_expired,
@@ -44,7 +44,7 @@ def apply_alias_actions(actions: list[dict], conn_id: str, dry_run: bool):
 
 
 @dag(
-    dag_display_name="Index Lifecycle Metadata Fix",
+    dag_display_name="Topic Builder: Index Lifecycle Metadata Fix",
     tags=["spf", "elasticsearch"],
     description="Fixes ILM origination-date metadata and finalizes expired indices in Elasticsearch.",
     max_active_runs=1,
