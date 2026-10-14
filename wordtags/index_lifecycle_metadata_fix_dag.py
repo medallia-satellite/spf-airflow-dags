@@ -6,7 +6,7 @@ from collections import defaultdict
 from airflow.decorators import dag, task
 from airflow.models import Param
 
-from fix_and_verify import (
+from wordtags.fix_and_verify import (
     POLICY_MAPPING,
     extract_index_details,
     index_has_expired,

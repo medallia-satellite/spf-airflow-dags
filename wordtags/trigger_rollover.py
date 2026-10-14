@@ -30,7 +30,7 @@ DAG params:
 Notes:
 - Uses URL-encoded rollover target index format:
   `<seaas-{tenant}-{now/M+1M{yyyy-MM-dd}}-{tenant_id}-{suffix:06}>`.
-- Depends on validation helpers and regex/policy mappings from `fix_and_verify.py`.
+- Depends on validation helpers and regex/policy mappings from `wordtags/fix_and_verify.py`.
 """
 
 import datetime
@@ -42,7 +42,7 @@ from airflow.decorators import dag, task
 from airflow.models import Param
 from dateutil.relativedelta import relativedelta
 
-from fix_and_verify import (
+from wordtags.fix_and_verify import (
     ALIAS_REGEX_MAPPING,
     POLICY_MAPPING,
     expected_index_template,
