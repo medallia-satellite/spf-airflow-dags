@@ -15,7 +15,8 @@ block the others. Tasks:
   inserts them with the next ``revision`` for the day, so reruns never overwrite earlier results.
 
 How each resource type is split (``weight`` is the tenant's share and adds up to 1 per
-dc/service/deployment/resource_type/date, ``tenant_id = 0`` included):
+dc/service/deployment/resource_type/date, ``tenant_id = 0`` included, except in the measured
+memory case described below):
 
 | resource_type  | cluster_total                                | tenant value                                   | unit       | rung     |
 |----------------|----------------------------------------------|------------------------------------------------|------------|----------|
@@ -25,13 +26,18 @@ dc/service/deployment/resource_type/date, ``tenant_id = 0`` included):
 | memory_request | memory requested by the cluster's containers | tenant's measured memory + its share of the rest by cpu_ms | gib_avg | activity |
 | storage        | sum of the tenants' storage                  | tenant's measured storage                      | gib_avg    | measured |
 
-``value = cluster_total * weight`` holds on every row.
+``value = cluster_total * weight`` holds on every row with a non-zero ``cluster_total`` (``weight`` is 0
+when it's 0).
 
 - cpu_ms: search and indexing time spent on the tenant's indices during the day.
 - memory: the memory Elasticsearch reports per index (``total_mem_bytes``: segments, caches,
   fielddata), averaged over the day, goes to its tenant; the rest of the cluster's memory (heap,
   page cache, overhead) is split by the tenant's share of cpu_ms. Elasticsearch 8 reports almost
-  nothing per index, so the rung is ``activity``.
+  nothing per index, so the rung is ``activity``. If the tenants' measured memory adds up to more
+  than the cluster's memory (only possible with partial or inconsistent data, since index memory
+  lives inside the containers), each tenant keeps its measured memory, nothing is left to split,
+  a warning is logged and that resource's values add up to more than ``cluster_total`` (so its
+  weights add up to more than 1).
 - storage: store size of the tenant's indices, measured every hour and averaged over the day
   (like storage billing), so an index deleted or created mid-day counts for the hours it existed.
 
@@ -46,7 +52,8 @@ written as its ``deployment``. Every container in the namespace counts towards t
 helpers like ``registrator`` or ``elasticsearch-shards-reporter`` included, since they run because
 of the cluster. ``date`` defaults to the run's ``ds``.
 
-The queries are in ``cost_obs/sql/`` and the rung functions in ``cost_obs/rungs.py``.
+The queries are in ``cost_obs/sql/``, the rung functions in ``cost_obs/rungs.py`` and the row
+building in ``cost_obs/tenant_rows.py``.
 
 Connections: ``clickhouse_costopt_sc4`` (ClickHouse, read-only) and
 ``sharedservices-clickhouse-spf-test`` (ClickHouse).
@@ -61,85 +68,20 @@ from airflow.models import Param
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
 
 from cost_obs.queries import load_query
-from cost_obs.rungs import UNATTRIBUTED_TENANT_ID, Split, rung_activity, rung_measured
+from cost_obs.rungs import UNATTRIBUTED_TENANT_ID
+from cost_obs.tenant_rows import CLICKHOUSE_COLUMNS, SERVICE, build_clickhouse_rows
 
 log = logging.getLogger(__name__)
 
 CLICKHOUSE_COSTOPT_CONN_ID = "clickhouse_costopt_sc4"
 CLICKHOUSE_SPF_CONN_ID = "sharedservices-clickhouse-spf-test"
 CLICKHOUSE_TABLE = "tenant_resource_usage_daily"
-CLICKHOUSE_COLUMNS = [
-    "date",
-    "dc",
-    "service",
-    "deployment",
-    "tenant_id",
-    "resource_type",
-    "value",
-    "unit",
-    "weight",
-    "cluster_total",
-    "rung",
-    "state",
-    "revision",
-    "calculated_at",
-]
-SERVICE = "elasticsearch"
 
 CLUSTER_TOTALS_SQL = load_query("workload_cluster_totals")
 CLUSTER_TOTALS_COLUMNS = ["cpu_core_hours", "cpu_request_core_hours", "memory_gib", "memory_request_gib"]
 TENANT_USAGE_SQL = load_query("elasticsearch_tenant_usage")
 TENANT_USAGE_COLUMNS = ["tenant_id", "cpu_ms", "memory_gib", "storage_gib", "snapshots"]
 NEXT_REVISION_SQL = load_query("next_revision")
-
-# resource_type -> (how it's split between tenants, unit); the rung_* keys are cluster totals and tenant usage columns.
-RESOURCES: Dict[str, Tuple[Split, str]] = {
-    "cpu": (rung_activity("cpu_core_hours", "cpu_ms"), "core_hours"),
-    "cpu_request": (rung_activity("cpu_request_core_hours", "cpu_ms"), "core_hours"),
-    "memory": (rung_activity("memory_gib", "cpu_ms", measured_key="memory_gib"), "gib_avg"),
-    "memory_request": (rung_activity("memory_request_gib", "cpu_ms", measured_key="memory_gib"), "gib_avg"),
-    "storage": (rung_measured("storage_gib"), "gib_avg"),
-}
-
-
-def build_clickhouse_rows(
-    cluster_totals: Dict[str, float],
-    tenant_usage: List[Dict[str, Any]],
-    day: date,
-    dc: str,
-    namespace: str,
-    revision: int,
-    calculated_at: datetime,
-) -> List[tuple]:
-    """Turn the cluster totals and per-tenant usage into ``tenant_resource_usage_daily`` rows, in ``CLICKHOUSE_COLUMNS`` order."""
-    rows = []
-
-    def add_row(tenant: Dict[str, Any], resource_type: str, value: float, unit: str, weight: float, total: float, rung: str):
-        rows.append(
-            (
-                day,
-                dc,
-                SERVICE,
-                namespace,
-                tenant["tenant_id"],
-                resource_type,
-                value,
-                unit,
-                weight,
-                total,
-                rung,
-                "provisional",
-                revision,
-                calculated_at,
-            )
-        )
-
-    for resource_type, (split, unit) in RESOURCES.items():
-        cluster_total, values, rung = split(cluster_totals, tenant_usage)
-        for tenant, value in zip(tenant_usage, values):
-            add_row(tenant, resource_type, value, unit, value / cluster_total if cluster_total else 0.0, cluster_total, rung)
-
-    return rows
 
 
 @dag(
