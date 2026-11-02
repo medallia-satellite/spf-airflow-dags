@@ -7,7 +7,7 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 
 @dag(
-    dag_display_name="Orchestrate Maintenance DAG",
+    dag_display_name="Topic Builder: Orchestrate Maintenance DAG",
     tags=["spf", "elasticsearch"],
     description="This DAG uses 'orchestrate_dag_targets' as targets to trigger maintenance workflows.",
     max_active_runs=1,

@@ -6,7 +6,7 @@ from typing import List
 from airflow.decorators import dag, task_group, task
 from airflow.models import Param
 
-from fix_and_verify import (
+from topic_builder.fix_and_verify import (
     BASE_REGEX,
     INDEX_REGEX,
     ALIAS_REGEX_MAPPING,
@@ -32,7 +32,7 @@ from utils import (
 
 
 @dag(
-    dag_display_name="Reconcile Monthly Indices",
+    dag_display_name="Topic Builder: Reconcile Monthly Indices",
     tags=["spf", "elasticsearch"],
     description="This DAG replaces fix and verify job.",
     max_active_runs=1,
@@ -152,14 +152,12 @@ def reconcile_monthly_indices_dag():
         @task
         def fetch(data: List[Context]) -> List[Context]:
             conn_id = param_value("conn_id")
-            non_seaas_templates = []
             results = http_hook_get(conn_id, "/_index_template/*-rollover")
             for r in results["index_templates"]:
                 if ALIAS_REGEX_MAPPING["rollover"].match(r["name"]):
                     xcom_push(r["name"], r["index_template"])
                 else:
-                    non_seaas_templates.append(r["name"])
-            logging.warning("Non-seaas templates: %s", non_seaas_templates)
+                    logging.warning("Non-seaas templates: %s", r["name"])
             return data
 
         @task
