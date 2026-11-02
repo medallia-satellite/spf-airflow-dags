@@ -93,6 +93,7 @@ NEXT_REVISION_SQL = load_query("next_revision")
     start_date=datetime(2026, 1, 1),
     # workload_usage_daily has the previous day by then; a missing day fails and is retried.
     schedule="0 6 * * *",
+    is_paused_upon_creation=True,
     catchup=False,
     default_args={"retries": 3, "retry_delay": timedelta(hours=1)},
     render_template_as_native_obj=True,

@@ -192,6 +192,7 @@ def build_clickhouse_rows(
     max_active_runs=1,
     start_date=datetime(2026, 1, 1),
     schedule="@hourly",
+    is_paused_upon_creation=True,
     catchup=False,
     render_template_as_native_obj=True,
     # Retries stay within the hour; a cluster that still fails loses that hour's snapshot.

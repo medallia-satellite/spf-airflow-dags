@@ -99,6 +99,7 @@ def build_clickhouse_rows(tenant_mapping: List[Dict[str, Any]]) -> List[tuple]:
     max_active_runs=1,
     start_date=datetime(2026, 1, 1),
     schedule="@daily",
+    is_paused_upon_creation=True,
     catchup=False,
     render_template_as_native_obj=True,
 )
