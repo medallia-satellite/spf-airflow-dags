@@ -7,8 +7,10 @@ from airflow.decorators import dag, task
 from airflow.models import Param
 
 from wordtags.fix_and_verify import (
-    POLICY_MAPPING,
+    POLICY_MAPPING_PARAM_SCHEMA,
     extract_index_details,
+    policy_retention,
+    resolve_policy_mapping,
     index_has_expired,
     ALIAS_REGEX_MAPPING,
     INDEX_REGEX,
@@ -53,10 +55,16 @@ def apply_alias_actions(actions: list[dict], conn_id: str, dry_run: bool):
     params={
         "conn_id": Param("es-testing", type="string"),
         "dry_run": Param(True, type="boolean"),
+        "policy_mapping": Param(None, **POLICY_MAPPING_PARAM_SCHEMA),
     },
     render_template_as_native_obj=True,
 )
 def index_lifecycle_metadata_fix_dag():
+
+    @task
+    def validate_policy_mapping() -> dict[str, int]:
+        """Resolve the mapping before any task writes to Elasticsearch."""
+        return resolve_policy_mapping(param_value("policy_mapping"))
 
     @task
     def set_origination_dates():
@@ -135,7 +143,7 @@ def index_lifecycle_metadata_fix_dag():
         return indices_needing_origination_fix_by_month
 
     @task
-    def mark_indexing_complete():
+    def mark_indexing_complete(mapping: dict[str, int]):
         dry_run = param_value("dry_run")
         conn_id = param_value("conn_id")
 
@@ -159,13 +167,14 @@ def index_lifecycle_metadata_fix_dag():
                 continue
 
             policy_name = results[min(results)]["settings"]["index.lifecycle.name"]
-            if policy_name not in POLICY_MAPPING:
+            tenant_retention = policy_retention(mapping, policy_name)
+            if tenant_retention is None:
                 logging.error(
                     f"{tenant} - Invalid retention policy: {policy_name}\n{json.dumps(results[min(results)], indent=2)}"
                 )
                 continue
 
-            retention[tenant] = POLICY_MAPPING[policy_name]
+            retention[tenant] = tenant_retention
 
         results = http_hook_get(
             conn_id,
@@ -231,7 +240,9 @@ def index_lifecycle_metadata_fix_dag():
 
         return expired
 
-    set_origination_dates() >> mark_indexing_complete()
+    mapping = validate_policy_mapping()
+    origination = set_origination_dates()
+    mapping >> origination >> mark_indexing_complete(mapping)
 
 
 index_lifecycle_metadata_fix_dag()
