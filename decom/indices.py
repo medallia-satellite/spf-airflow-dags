@@ -1,12 +1,10 @@
-"""Decom: the index pattern, cluster selection and summary of ``decom_list_seaas_indices_dag``.
+"""Decom: the index pattern and summary of ``decom_list_seaas_indices_dag``.
 
 Kept out of the DAG file so it can be tested without Airflow.
 """
 
 import re
 from typing import Any, Dict, List
-
-CLUSTERS_VARIABLE = "elasticsearch_clusters"
 
 # What a company (its in_app_id) and an instance (its hostname) may look like. Both go into an
 # Elasticsearch index pattern, so wildcards and commas must never get through.
@@ -27,21 +25,6 @@ def index_pattern(company: str, instance: str) -> str:
     if not re.fullmatch(INSTANCE_PATTERN, instance or ""):
         raise ValueError(f"instance must be a hostname like acme.medallia.eu, got {instance!r}")
     return f"seaas-{company}_*-{instance}-{company}-*"
-
-
-def active_clusters(clusters: List[Dict[str, Any]], dag_id: str) -> List[Dict[str, str]]:
-    """``{"conn_id", "dc", "namespace"}`` of the ``CLUSTERS_VARIABLE`` clusters with ``dag_id`` in ``active_dags``.
-
-    Raises ``ValueError`` if there are none.
-    """
-    active = [
-        {"conn_id": c["conn_id"], "dc": c["dc"], "namespace": c["namespace"]}
-        for c in clusters
-        if dag_id in c.get("active_dags", [])
-    ]
-    if not active:
-        raise ValueError(f"No cluster in Variable {CLUSTERS_VARIABLE} has {dag_id} in its active_dags")
-    return active
 
 
 def parse_indices(cat_indices: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:

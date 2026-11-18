@@ -1,8 +1,9 @@
 """Decom: list a company's seaas Elasticsearch indices.
 
 Manually triggered with a ``company`` (its in_app_id) and its ``instance`` (hostname). On every
-cluster of the ``elasticsearch_clusters`` Variable with this DAG in its ``active_dags``, lists the
-indices matching ``seaas-<company>_*-<instance>-<company>-*``, e.g. for acme on acme.medallia.eu::
+cluster of the ``elasticsearch_clusters`` Variable (see ``elasticsearch_clusters.py``), unless the
+cluster turns this DAG off in its ``dags``, lists the indices matching
+``seaas-<company>_*-<instance>-<company>-*``, e.g. for acme on acme.medallia.eu::
 
     seaas-acme_surveys-acme.medallia.eu-acme-0
     seaas-acme_topic-builder-acme.medallia.eu-acme-2023-10-01-123456-000045
@@ -18,14 +19,16 @@ block per namespace, skipping clusters without any::
     seaas-acme_topic-builder-acme.medallia.eu-acme-2023-11-01-123456-000046 (closed, 95.3mb)
 
 and returns ``{conn_id: {index: {"status", "docs", "bytes"}}}`` for those clusters. Docs only
-count open indices. The logic lives in ``decom.indices``. It doesn't change anything. ``elasticsearch_clusters`` looks like::
+count open indices. The logic lives in ``decom.indices``. It doesn't change anything.
+``elasticsearch_clusters`` looks like this; the ``dags`` entry is only needed to skip a cluster::
 
     [
+        {"conn_id": "es-shared", "dc": "den", "namespace": "sharedservices-elasticsearch"},
         {
-            "conn_id": "es-wordtags",
+            "conn_id": "es-wordtags-qa",
             "dc": "den",
-            "namespace": "wordtags",
-            "active_dags": ["decom_list_seaas_indices_dag"]
+            "namespace": "wordtags-qa",
+            "dags": {"decom_list_seaas_indices_dag": false}
         }
     ]
 """
@@ -40,15 +43,14 @@ from airflow.operators.python import get_current_context
 
 from decom.indices import (
     CAT_INDICES_COLUMNS,
-    CLUSTERS_VARIABLE,
     COMPANY_PATTERN,
     INSTANCE_PATTERN,
-    active_clusters,
     format_cluster,
     format_summary,
     index_pattern,
     parse_indices,
 )
+from elasticsearch_clusters import CLUSTERS_VARIABLE, clusters_for
 from utils import http_hook_get, param_value
 
 log = logging.getLogger(__name__)
@@ -73,9 +75,9 @@ log = logging.getLogger(__name__)
 )
 def decom_list_seaas_indices_dag():
     @task
-    def load_clusters() -> List[Dict[str, str]]:
+    def load_clusters() -> List[Dict[str, Any]]:
         dag_id = get_current_context()["dag"].dag_id
-        return active_clusters(Variable.get(CLUSTERS_VARIABLE, deserialize_json=True), dag_id)
+        return clusters_for(Variable.get(CLUSTERS_VARIABLE, deserialize_json=True), dag_id)
 
     # One mapped instance per cluster, labelled with its conn_id in the UI.
     @task(
@@ -84,7 +86,7 @@ def decom_list_seaas_indices_dag():
         retry_delay=timedelta(minutes=5),
         execution_timeout=timedelta(minutes=5),
     )
-    def list_indices(cluster: Dict[str, str]) -> Dict[str, Any]:
+    def list_indices(cluster: Dict[str, Any]) -> Dict[str, Any]:
         conn_id = get_current_context()["conn_id"] = cluster["conn_id"]
         pattern = index_pattern(param_value("company"), param_value("instance"))
         fetched = http_hook_get(
