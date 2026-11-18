@@ -1,12 +1,21 @@
 """Behaviour of the ``decom.indices`` helpers behind ``decom_list_seaas_indices_dag``: which input
-reaches the clusters and how it reads their answer. Which clusters it asks is covered in
+reaches the clusters, how it reads their answer, and which snapshots count for an index. Which
+clusters it asks is covered in
 ``test_elasticsearch_clusters.py``; the summary is only log text, so it isn't pinned here."""
 
 import re
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from decom.indices import COMPANY_PATTERN, INSTANCE_PATTERN, index_pattern, parse_indices
+from decom.indices import (
+    COMPANY_PATTERN,
+    INSTANCE_PATTERN,
+    index_pattern,
+    indices_with_docs,
+    parse_indices,
+    recent_snapshots,
+)
 
 SURVEYS = "seaas-acme_surveys-acme.medallia.eu-acme-0"
 TOPIC_BUILDER = "seaas-acme_topic-builder-acme.medallia.eu-acme-2023-10-01-123456-000045"
@@ -59,3 +68,56 @@ class TestParseIndices:
 
     def test_handles_no_indices(self):
         assert parse_indices([]) == {}
+
+
+def test_indices_with_docs_skips_empty_and_closed_indices():
+    indices = {
+        "with-docs": {"status": "open", "docs": 5, "bytes": 100},
+        "empty": {"status": "open", "docs": 0, "bytes": 208},
+        "closed": {"status": "close", "docs": None, "bytes": 100},
+    }
+
+    assert indices_with_docs(indices) == ["with-docs"]
+
+
+NOW = datetime(2026, 11, 19, 12, 0, tzinfo=timezone.utc)
+SINCE = NOW - timedelta(hours=24)
+
+
+def snapshot(name, started, indices, state="SUCCESS"):
+    """One snapshot of a ``GET /_snapshot/<repository>/_all`` response."""
+    started_ms = int(started.timestamp() * 1000)
+    return {"snapshot": name, "state": state, "start_time_in_millis": started_ms, "indices": indices}
+
+
+class TestRecentSnapshots:
+    def test_maps_each_index_to_its_latest_successful_snapshot_in_the_window(self):
+        response = {
+            "snapshots": [
+                snapshot("late", NOW - timedelta(hours=1), [SURVEYS]),
+                snapshot("early", NOW - timedelta(hours=20), [SURVEYS, TOPIC_BUILDER]),
+            ]
+        }
+
+        assert recent_snapshots(response, SINCE) == {SURVEYS: "late", TOPIC_BUILDER: "early"}
+
+    def test_counts_a_snapshot_started_exactly_24h_ago(self):
+        response = {"snapshots": [snapshot("edge", SINCE, [SURVEYS])]}
+
+        assert recent_snapshots(response, SINCE) == {SURVEYS: "edge"}
+
+    @pytest.mark.parametrize(
+        "older_or_failed",
+        [
+            snapshot("too-old", SINCE - timedelta(seconds=1), [SURVEYS]),
+            snapshot("partial", NOW, [SURVEYS], state="PARTIAL"),
+            snapshot("failed", NOW, [SURVEYS], state="FAILED"),
+            snapshot("running", NOW, [SURVEYS], state="IN_PROGRESS"),
+        ],
+    )
+    def test_ignores_older_and_unsuccessful_snapshots(self, older_or_failed):
+        assert recent_snapshots({"snapshots": [older_or_failed]}, SINCE) == {}
+
+    def test_handles_an_empty_repository(self):
+        # With filter_path, an empty repository answers {} instead of {"snapshots": []}.
+        assert recent_snapshots({}, SINCE) == {}
