@@ -1,4 +1,5 @@
 import datetime
+import json
 import re
 
 from dateutil.relativedelta import relativedelta
@@ -34,8 +35,8 @@ POLICY_MAPPING_PARAM_SCHEMA = {
     "additionalProperties": {"type": "integer", "minimum": 1},
     "description": (
         "Optional ILM policy base name -> retention months. Replaces the defaults "
-        f"({POLICY_MAPPING}) when set. 'X' also covers 'X{ROLLOVER_POLICY_SUFFIX}', "
-        'e.g. {"M6": 2}.'
+        f"({json.dumps(POLICY_MAPPING)}) when set. "
+        f'"X" also covers "X{ROLLOVER_POLICY_SUFFIX}", e.g. {{"M6": 2}}.'
     ),
 }
 
