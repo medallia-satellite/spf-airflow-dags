@@ -9,7 +9,10 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 @dag(
     dag_display_name="Wordtags: Orchestrate Maintenance DAG",
     tags=["spf", "elasticsearch"],
-    description="This DAG uses 'orchestrate_dag_targets' as targets to trigger maintenance workflows.",
+    description=(
+        "This DAG uses 'orchestrate_dag_targets' as targets to trigger maintenance workflows. "
+        "Each target's config is passed as conf (e.g. conn_id, dry_run, policy_mapping)."
+    ),
     max_active_runs=1,
     start_date=datetime(2026, 1, 1),
     schedule="@monthly",

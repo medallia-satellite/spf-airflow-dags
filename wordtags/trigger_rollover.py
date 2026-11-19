@@ -26,6 +26,9 @@ Safety:
 DAG params:
 - `conn_id` (str): Airflow connection ID for Elasticsearch (default: `es-testing`).
 - `dry_run` (bool): If true, call rollover API with `dry_run=true` (default: `True`).
+- `policy_mapping` (object | null): ILM policy base name -> retention months
+  (`M6` also covers `M6_rollover`). Replaces `POLICY_MAPPING` when set
+  (default: `None`, i.e. use `POLICY_MAPPING`).
 
 Notes:
 - Uses URL-encoded rollover target index format:
@@ -45,8 +48,11 @@ from dateutil.relativedelta import relativedelta
 from wordtags.fix_and_verify import (
     ALIAS_REGEX_MAPPING,
     POLICY_MAPPING,
+    POLICY_MAPPING_PARAM_SCHEMA,
     expected_index_template,
     extract_index_details,
+    policy_base_name,
+    policy_retention,
     BASE_REGEX,
     INDEX_REGEX,
 )
@@ -91,11 +97,13 @@ def fetch_tenants(conn_id: str) -> Set[str]:
     }
 
 
-def fetch_tenant_retention(conn_id: str, tenant: str) -> Optional[int]:
-    """Return retention months for a tenant from its ILM policy.
+def fetch_tenant_retention(
+    conn_id: str, tenant: str, mapping: dict[str, int]
+) -> Optional[tuple[str, int]]:
+    """Return `(policy_base, retention_months)` for a tenant from its ILM policy.
 
     Reads `{tenant}` index lifecycle settings, maps policy name via
-    `POLICY_MAPPING`, and returns None when missing/invalid.
+    `mapping`, and returns None when missing/invalid.
     """
     tenant_settings = http_hook_get(
         conn_id,
@@ -109,24 +117,30 @@ def fetch_tenant_retention(conn_id: str, tenant: str) -> Optional[int]:
     policy_name = tenant_settings[min(tenant_settings)]["settings"].get(
         "index.lifecycle.name"
     )
-    if policy_name not in POLICY_MAPPING:
+    retention = policy_retention(mapping, policy_name)
+    if retention is None:
         logging.error(f"{tenant}: invalid retention policy '{policy_name}'.")
         return None
 
-    return POLICY_MAPPING[policy_name]
+    return policy_base_name(policy_name), retention
 
 
-def retention_by_tenant(conn_id: str) -> dict[str, int]:
+def retention_by_tenant(
+    conn_id: str, mapping: dict[str, int]
+) -> dict[str, tuple[str, int]]:
+    """Return `(policy_base, retention_months)` keyed by tenant."""
     tenants = fetch_tenants(conn_id)
     results = {}
     for tenant in tenants:
-        retention = fetch_tenant_retention(conn_id, tenant)
+        retention = fetch_tenant_retention(conn_id, tenant, mapping)
         if retention:
             results[tenant] = retention
     return results
 
 
-def index_templates_by_tenant(conn_id: str) -> dict[str, dict]:
+def index_templates_by_tenant(
+    conn_id: str, mapping: dict[str, int]
+) -> dict[str, dict]:
     """Return validated rollover index templates keyed by tenant.
 
     Keeps only templates that:
@@ -135,7 +149,7 @@ def index_templates_by_tenant(conn_id: str) -> dict[str, dict]:
     - match `expected_index_template(...)` (ignoring `composed_of`).
     """
     index_templates = http_hook_get(conn_id, "/_index_template/*-rollover")
-    retentions = retention_by_tenant(conn_id)
+    retentions = retention_by_tenant(conn_id, mapping)
     results: dict[str, dict] = {}
     for entry in index_templates.get("index_templates", []):
         template_name = entry["name"]
@@ -155,7 +169,7 @@ def index_templates_by_tenant(conn_id: str) -> dict[str, dict]:
         comparable = {k: v for k, v in index_template.items() if k != "composed_of"}
         if comparable != expected_index_template(
             tenant=tenant,
-            retention_months=retentions[tenant],
+            policy_base=retentions[tenant][0],
         ):
             logging.error(
                 f"{tenant}: index template does not match expected.\n{json.dumps(comparable, indent=2)}"
@@ -167,9 +181,9 @@ def index_templates_by_tenant(conn_id: str) -> dict[str, dict]:
     return results
 
 
-def valid_tenants(conn_id: str) -> Set[str]:
+def valid_tenants(conn_id: str, mapping: dict[str, int]) -> Set[str]:
     """Return tenants that have fully validated rollover templates."""
-    result = index_templates_by_tenant(conn_id)
+    result = index_templates_by_tenant(conn_id, mapping)
     return set(result.keys())
 
 
@@ -183,6 +197,7 @@ def valid_tenants(conn_id: str) -> Set[str]:
     params={
         "conn_id": Param("es-testing", type="string"),
         "dry_run": Param(True, type="boolean"),
+        "policy_mapping": Param(None, **POLICY_MAPPING_PARAM_SCHEMA),
     },
     render_template_as_native_obj=True,
 )
@@ -204,7 +219,9 @@ def trigger_rollover_dag():
         dry_run = param_value("dry_run")
         conn_id = param_value("conn_id")
 
-        tenants = valid_tenants(conn_id)
+        mapping = param_value("policy_mapping") or POLICY_MAPPING
+
+        tenants = valid_tenants(conn_id, mapping)
         current_month_start = datetime.date.today().replace(day=1)
         next_month_start = current_month_start + relativedelta(months=1)
         next_month_start_ms = int(

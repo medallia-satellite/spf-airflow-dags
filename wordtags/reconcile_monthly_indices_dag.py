@@ -11,9 +11,12 @@ from wordtags.fix_and_verify import (
     INDEX_REGEX,
     ALIAS_REGEX_MAPPING,
     POLICY_MAPPING,
+    POLICY_MAPPING_PARAM_SCHEMA,
     expected_index_template,
     extract_index_details,
     generate_write_aliases,
+    policy_base_name,
+    policy_retention,
 )
 from utils import (
     xcom_pull,
@@ -41,6 +44,7 @@ from utils import (
     params={
         "conn_id": Param("es-testing", type="string"),
         "dry_run": Param(True, type="boolean"),
+        "policy_mapping": Param(None, **POLICY_MAPPING_PARAM_SCHEMA),
     },
     render_template_as_native_obj=True,
 )
@@ -114,9 +118,11 @@ def reconcile_monthly_indices_dag():
                 il.get("rollover_alias") for il in il_list if il.get("rollover_alias")
             ]
 
+            mapping = param_value("policy_mapping") or POLICY_MAPPING
             if (
-                len(set(POLICY_MAPPING.get(p) for p in policies)) != 1
-                or policies[0] not in POLICY_MAPPING
+                not policies
+                or any(policy_retention(mapping, p) is None for p in policies)
+                or len(set(policy_base_name(p) for p in policies)) != 1
             ):
                 return failure(
                     context=context,
@@ -138,7 +144,12 @@ def reconcile_monthly_indices_dag():
                     error="Some indices are missing ILM settings",
                 )
 
-            context.update({"retention": POLICY_MAPPING[policies[0]]})
+            context.update(
+                {
+                    "retention": policy_retention(mapping, policies[0]),
+                    "policy": policy_base_name(policies[0]),
+                }
+            )
             return success(context=context, stage=stage)
 
         verified = verify.expand(context=fetch(upstream))
@@ -175,7 +186,7 @@ def reconcile_monthly_indices_dag():
 
             comparable = {k: v for k, v in index_template.items() if k != "composed_of"}
             if comparable != expected_index_template(
-                tenant=context["tenant"], retention_months=context["retention"]
+                tenant=context["tenant"], policy_base=context["policy"]
             ):
                 return failure(
                     context=context,
@@ -193,7 +204,7 @@ def reconcile_monthly_indices_dag():
             template_name = f"{context['tenant']}-rollover"
             index_template = expected_index_template(
                 tenant=context["tenant"],
-                retention_months=context["retention"],
+                policy_base=context["policy"],
             )
 
             print(
@@ -250,9 +261,9 @@ def reconcile_monthly_indices_dag():
                 index = f'seaas-{write_alias}-{context["tenant_id"]}-{suffix:06}'
                 details = extract_index_details(index)
                 policy = (
-                    f'M{context["retention"]}_rollover'
+                    f'{context["policy"]}_rollover'
                     if details["should_rollover"]
-                    else f'M{context["retention"]}'
+                    else context["policy"]
                 )
                 payload = {
                     "settings": {
