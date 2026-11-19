@@ -50,21 +50,21 @@ class TestIndexPattern:
 
 
 class TestParseIndices:
-    def test_reads_status_docs_and_bytes_sorted_by_index(self):
+    def test_reads_docs_and_bytes_sorted_by_index(self):
         response = [
-            {"index": TOPIC_BUILDER, "status": "open", "docs.count": "0", "store.size": "208"},
-            {"index": SURVEYS, "status": "open", "docs.count": "28401", "store.size": "1181116006"},
+            {"index": TOPIC_BUILDER, "docs.count": "0", "store.size": "208"},
+            {"index": SURVEYS, "docs.count": "28401", "store.size": "1181116006"},
         ]
 
         assert list(parse_indices(response).items()) == [
-            (SURVEYS, {"status": "open", "docs": 28401, "bytes": 1181116006}),
-            (TOPIC_BUILDER, {"status": "open", "docs": 0, "bytes": 208}),
+            (SURVEYS, {"docs": 28401, "bytes": 1181116006}),
+            (TOPIC_BUILDER, {"docs": 0, "bytes": 208}),
         ]
 
-    def test_closed_indices_have_no_doc_count(self):
-        response = [{"index": SURVEYS, "status": "close", "docs.count": None, "store.size": None}]
+    def test_null_counts_of_closed_indices_are_zero(self):
+        response = [{"index": SURVEYS, "docs.count": None, "store.size": None}]
 
-        assert parse_indices(response) == {SURVEYS: {"status": "close", "docs": None, "bytes": 0}}
+        assert parse_indices(response) == {SURVEYS: {"docs": 0, "bytes": 0}}
 
     def test_handles_no_indices(self):
         assert parse_indices([]) == {}
@@ -72,9 +72,9 @@ class TestParseIndices:
 
 def test_indices_with_docs_skips_empty_and_closed_indices():
     indices = {
-        "with-docs": {"status": "open", "docs": 5, "bytes": 100},
-        "empty": {"status": "open", "docs": 0, "bytes": 208},
-        "closed": {"status": "close", "docs": None, "bytes": 100},
+        "with-docs": {"docs": 5, "bytes": 100},
+        "empty": {"docs": 0, "bytes": 208},
+        "closed": parse_indices([{"index": "closed", "docs.count": None, "store.size": None}])["closed"],
     }
 
     assert indices_with_docs(indices) == ["with-docs"]

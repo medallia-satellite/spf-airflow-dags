@@ -12,21 +12,21 @@ cluster turns this DAG off in its ``dags``, lists the indices matching
 clusters. Tasks, one per cluster for the first two, each timing out after 5 minutes and retrying
 twice:
 
-- ``list_indices``: the matching indices with their status, document count and size.
-- ``check_snapshots``: for the open indices with documents, the latest ``SUCCESS`` snapshot in the
+- ``list_indices``: the matching indices with their document count and size.
+- ``check_snapshots``: for the indices with documents, the latest ``SUCCESS`` snapshot in the
   cluster's ``es-snapshots`` repository that started in the last 24 hours and includes the index.
   Indices without one, and clusters whose snapshots can't be read (e.g. no such repository), are
   warned about, not failed on.
 - ``summarize``: logs the indices, one block per namespace, skipping clusters without any::
 
-    namespace: sharedservices-elasticsearch (3 indices, 28,401 docs, 1.2gb, 1 closed, 1 without snapshot)
-    seaas-acme_surveys-acme.medallia.eu-acme-0 (28,401 docs, 1.1gb, no snapshot in 24h)
+    namespace: sharedservices-elasticsearch (3 indices, 28,413 docs, 1.1gb, 1 without snapshot)
+    seaas-acme_surveys-acme.medallia.eu-acme-0 (28,401 docs, 1.1gb, snapshot den-hourly-2026-11-19)
+    seaas-acme_topic-builder-acme.medallia.eu-acme-2023-09-01-123456-000044 (12 docs, 4.9kb, no snapshot in 24h)
     seaas-acme_topic-builder-acme.medallia.eu-acme-2023-10-01-123456-000045 (0 docs, 208b)
-    seaas-acme_topic-builder-acme.medallia.eu-acme-2023-11-01-123456-000046 (closed, 95.3mb)
 
-  and returns ``{conn_id: {index: {"status", "docs", "bytes"[, "snapshot"]}}}`` for those
-  clusters; ``snapshot`` is the snapshot's name, or None if there's none in 24h. Docs only count
-  open indices. The logic lives in ``decom.indices``. It doesn't change anything.
+  and returns ``{conn_id: {index: {"docs", "bytes"[, "snapshot"]}}}`` for those clusters;
+  ``snapshot`` is the snapshot's name, or None if there's none in 24h. Closed indices show 0 docs
+  and aren't checked. The logic lives in ``decom.indices``. It doesn't change anything.
 ``elasticsearch_clusters`` looks like this; the ``dags`` entry is only needed to skip a cluster::
 
     [

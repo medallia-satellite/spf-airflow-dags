@@ -13,7 +13,7 @@ COMPANY_PATTERN = r"^\w+$"
 INSTANCE_PATTERN = r"^[\w-]+(\.[\w-]+)*$"
 
 # _cat/indices columns to ask for; with bytes=b, store.size is a number of bytes.
-CAT_INDICES_COLUMNS = "index,status,docs.count,store.size"
+CAT_INDICES_COLUMNS = "index,docs.count,store.size"
 
 # Indices with documents must be in a successful snapshot of this repository taken this recently.
 SNAPSHOT_REPOSITORY = "es-snapshots"
@@ -35,24 +35,20 @@ def index_pattern(company: str, instance: str) -> str:
 
 
 def parse_indices(cat_indices: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """``{index: {"status", "docs", "bytes"}}`` from a ``_cat/indices`` response, sorted by index.
+    """``{index: {"docs", "bytes"}}`` from a ``_cat/indices`` response, sorted by index.
 
-    The response must have the ``CAT_INDICES_COLUMNS`` with ``bytes=b``. ``docs.count`` is null for
-    closed indices, so their ``docs`` is None; a null ``store.size`` counts as 0 bytes.
+    The response must have the ``CAT_INDICES_COLUMNS`` with ``bytes=b``. Closed indices have null
+    ``docs.count`` and ``store.size``; they count as 0.
     """
     return {
-        r["index"]: {
-            "status": r["status"],
-            "docs": None if r["docs.count"] is None else int(r["docs.count"]),
-            "bytes": int(r["store.size"] or 0),
-        }
+        r["index"]: {"docs": int(r["docs.count"] or 0), "bytes": int(r["store.size"] or 0)}
         for r in sorted(cat_indices, key=lambda r: r["index"])
     }
 
 
 def indices_with_docs(indices: Dict[str, Dict[str, Any]]) -> List[str]:
-    """The open indices in ``parse_indices`` output that have documents, i.e. the ones to find a snapshot of."""
-    return [index for index, i in indices.items() if i["status"] != "close" and i["docs"]]
+    """The indices in ``parse_indices`` output that have documents, i.e. the ones to find a snapshot of."""
+    return [index for index, i in indices.items() if i["docs"]]
 
 
 def recent_snapshots(snapshots_response: dict, since: datetime) -> Dict[str, str]:
@@ -88,24 +84,18 @@ def format_bytes(n: int) -> str:
 def format_cluster(namespace: str, indices: Dict[str, Dict[str, Any]]) -> str:
     """A namespace header, then one line per index.
 
-    ``namespace: <namespace> (<n> indices, <docs> docs, <size>[, <k> closed][, <m> without snapshot])``,
-    where docs only counts open indices, then ``<index> (<docs> docs, <size>)`` or
-    ``<index> (closed, <size>)``. Indices that were checked for a snapshot (they have a ``snapshot``
-    key) end in ``, snapshot <name>`` or ``, no snapshot in 24h``.
+    ``namespace: <namespace> (<n> indices, <docs> docs, <size>[, <m> without snapshot])``, then
+    ``<index> (<docs> docs, <size>)``. Indices that were checked for a snapshot (they have a
+    ``snapshot`` key) end in ``, snapshot <name>`` or ``, no snapshot in 24h``.
     """
-    closed = sum(1 for i in indices.values() if i["status"] == "close")
     unsnapshotted = sum(1 for i in indices.values() if "snapshot" in i and not i["snapshot"])
-    docs = sum(i["docs"] or 0 for i in indices.values() if i["status"] != "close")
+    docs = sum(i["docs"] for i in indices.values())
     size = format_bytes(sum(i["bytes"] for i in indices.values()))
     header = f"namespace: {namespace} ({len(indices)} indices, {docs:,} docs, {size}"
-    header += f", {closed} closed" if closed else ""
     header += f", {unsnapshotted} without snapshot" if unsnapshotted else ""
     lines = [header + ")"]
     for index, i in indices.items():
-        if i["status"] == "close":
-            details = f"closed, {format_bytes(i['bytes'])}"
-        else:
-            details = f"{i['docs'] or 0:,} docs, {format_bytes(i['bytes'])}"
+        details = f"{i['docs']:,} docs, {format_bytes(i['bytes'])}"
         if "snapshot" in i:
             details += f", snapshot {i['snapshot']}" if i["snapshot"] else ", no snapshot in 24h"
         lines.append(f"{index} ({details})")
