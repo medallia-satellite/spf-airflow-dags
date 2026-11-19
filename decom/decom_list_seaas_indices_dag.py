@@ -15,7 +15,8 @@ twice:
 - ``list_indices``: the matching indices with their status, document count and size.
 - ``check_snapshots``: for the open indices with documents, the latest ``SUCCESS`` snapshot in the
   cluster's ``es-snapshots`` repository that started in the last 24 hours and includes the index.
-  Indices without one are reported, not failed on.
+  Indices without one, and clusters whose snapshots can't be read (e.g. no such repository), are
+  warned about, not failed on.
 - ``summarize``: logs the indices, one block per namespace, skipping clusters without any::
 
     namespace: sharedservices-elasticsearch (3 indices, 28,401 docs, 1.2gb, 1 closed, 1 without snapshot)
@@ -118,16 +119,24 @@ def decom_list_seaas_indices_dag():
             return cluster
 
         since = datetime.now(timezone.utc) - SNAPSHOT_WINDOW
-        response = http_hook_get(
-            conn_id, f"/_snapshot/{SNAPSHOT_REPOSITORY}/_all", params={"filter_path": SNAPSHOT_FILTER_PATH}
-        )
+        try:
+            response = http_hook_get(
+                conn_id, f"/_snapshot/{SNAPSHOT_REPOSITORY}/_all", params={"filter_path": SNAPSHOT_FILTER_PATH}
+            )
+        except Exception as error:  # e.g. no such repository on this cluster: warn, don't fail the run
+            log.warning(
+                "Couldn't get the %s snapshots on %s, not checking them: %s", SNAPSHOT_REPOSITORY, conn_id, error
+            )
+            return cluster
+
         snapshots = recent_snapshots(response, since)
         indices = {
             index: {**i, "snapshot": snapshots.get(index)} if index in to_check else i
             for index, i in cluster["indices"].items()
         }
         missing = [index for index in to_check if not snapshots.get(index)]
-        log.info(
+        log.log(
+            logging.WARNING if missing else logging.INFO,
             "%d of %d indices with documents on %s have a %s snapshot since %s; without one:\n%s",
             len(to_check) - len(missing),
             len(to_check),
