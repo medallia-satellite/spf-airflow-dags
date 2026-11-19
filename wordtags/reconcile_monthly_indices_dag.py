@@ -10,13 +10,13 @@ from wordtags.fix_and_verify import (
     BASE_REGEX,
     INDEX_REGEX,
     ALIAS_REGEX_MAPPING,
+    POLICY_MAPPING,
     POLICY_MAPPING_PARAM_SCHEMA,
     expected_index_template,
     extract_index_details,
     generate_write_aliases,
     policy_base_name,
     policy_retention,
-    resolve_policy_mapping,
 )
 from utils import (
     xcom_pull,
@@ -52,13 +52,6 @@ def reconcile_monthly_indices_dag():
     @task
     def fetch_indices_per_tenant() -> List[Context]:
         conn_id = param_value("conn_id")
-
-        # Validate once, up front: a bad mapping fails this task instead of
-        # every mapped `verify`. Tenant keys always contain "_topic-builder",
-        # so this key can't collide with them.
-        xcom_push(
-            "policy_mapping", resolve_policy_mapping(param_value("policy_mapping"))
-        )
 
         fetched = http_hook_get(
             conn_id,
@@ -125,7 +118,7 @@ def reconcile_monthly_indices_dag():
                 il.get("rollover_alias") for il in il_list if il.get("rollover_alias")
             ]
 
-            mapping = xcom_pull("fetch_indices_per_tenant", "policy_mapping")
+            mapping = param_value("policy_mapping") or POLICY_MAPPING
             if (
                 not policies
                 or any(policy_retention(mapping, p) is None for p in policies)

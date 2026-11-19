@@ -24,15 +24,17 @@ POLICY_MAPPING = {
     "M36": 36,
 }
 ROLLOVER_POLICY_SUFFIX = "_rollover"
-# Keyword arguments for the `policy_mapping` Airflow Param (JSON schema), so a
-# malformed mapping is rejected when the run is triggered. Kept as a plain dict
-# to keep this module free of Airflow imports.
+# Keyword arguments for the `policy_mapping` Airflow Param (JSON schema).
+# Airflow validates every run's conf against it when the run is created, so a
+# malformed mapping never reaches a task. Kept as a plain dict to keep this
+# module free of Airflow imports.
 POLICY_MAPPING_PARAM_SCHEMA = {
     "type": ["null", "object"],
+    "propertyNames": {"not": {"pattern": f"{ROLLOVER_POLICY_SUFFIX}$"}},
     "additionalProperties": {"type": "integer", "minimum": 1},
     "description": (
-        "Optional ILM policy name -> retention months. Replaces the defaults "
-        f"({POLICY_MAPPING}) when set. 'X' also covers 'X_rollover', "
+        "Optional ILM policy base name -> retention months. Replaces the defaults "
+        f"({POLICY_MAPPING}) when set. 'X' also covers 'X{ROLLOVER_POLICY_SUFFIX}', "
         'e.g. {"M6": 2}.'
     ),
 }
@@ -48,35 +50,6 @@ def policy_retention(mapping: dict[str, int], name: str | None) -> int | None:
     if not isinstance(name, str):
         return None
     return mapping.get(policy_base_name(name))
-
-
-def resolve_policy_mapping(override: dict | None) -> dict[str, int]:
-    """Return the policy base name -> retention months mapping to use for a run.
-
-    A falsy `override` falls back to `POLICY_MAPPING`; otherwise `override`
-    replaces it entirely. Keys may be given as `X` or `X_rollover`; both are
-    normalized to `X`, since the two always share a retention. Giving both
-    with different retentions is an error.
-    """
-    if not override:
-        return POLICY_MAPPING
-    if not isinstance(override, dict):
-        raise ValueError(f"policy_mapping must be an object, got {type(override).__name__}")
-
-    resolved: dict[str, int] = {}
-    for name, months in override.items():
-        if not isinstance(months, int) or isinstance(months, bool) or months <= 0:
-            raise ValueError(f"policy_mapping['{name}'] must be a positive integer, got {months!r}")
-
-        base = policy_base_name(name)
-        if resolved.get(base, months) != months:
-            rollover = f"{base}{ROLLOVER_POLICY_SUFFIX}"
-            raise ValueError(
-                f"policy_mapping['{base}'] and policy_mapping['{rollover}'] must have the same retention"
-            )
-        resolved[base] = months
-
-    return resolved
 
 
 INDEX_TEMPLATE_SETTINGS_INDEX_ANALYSIS = {

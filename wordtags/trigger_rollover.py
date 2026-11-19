@@ -26,8 +26,9 @@ Safety:
 DAG params:
 - `conn_id` (str): Airflow connection ID for Elasticsearch (default: `es-testing`).
 - `dry_run` (bool): If true, call rollover API with `dry_run=true` (default: `True`).
-- `policy_mapping` (object | null): ILM policy name -> retention months. Replaces
-  `POLICY_MAPPING` when set (default: `None`, i.e. use `POLICY_MAPPING`).
+- `policy_mapping` (object | null): ILM policy base name -> retention months
+  (`M6` also covers `M6_rollover`). Replaces `POLICY_MAPPING` when set
+  (default: `None`, i.e. use `POLICY_MAPPING`).
 
 Notes:
 - Uses URL-encoded rollover target index format:
@@ -46,12 +47,12 @@ from dateutil.relativedelta import relativedelta
 
 from wordtags.fix_and_verify import (
     ALIAS_REGEX_MAPPING,
+    POLICY_MAPPING,
     POLICY_MAPPING_PARAM_SCHEMA,
     expected_index_template,
     extract_index_details,
     policy_base_name,
     policy_retention,
-    resolve_policy_mapping,
     BASE_REGEX,
     INDEX_REGEX,
 )
@@ -218,7 +219,7 @@ def trigger_rollover_dag():
         dry_run = param_value("dry_run")
         conn_id = param_value("conn_id")
 
-        mapping = resolve_policy_mapping(param_value("policy_mapping"))
+        mapping = param_value("policy_mapping") or POLICY_MAPPING
 
         tenants = valid_tenants(conn_id, mapping)
         current_month_start = datetime.date.today().replace(day=1)
